@@ -8,5 +8,6 @@ export const START_Y = 26;
 export const CAN_RADIUS = 0.5;
 // How far past the asphalt edge the can may drift before the buildings stop it.
 export const SHOULDER_REACH = 2.55;
-export const BUILDING_SETBACK = 3.15;
+// Facade sits past the sidewalk and a planting strip, beyond the shoulder stop.
+export const BUILDING_SETBACK = 5.0;
 export const SIDEWALK_CENTER = 1.7;

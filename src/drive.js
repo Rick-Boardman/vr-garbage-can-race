@@ -155,12 +155,13 @@ export function stepRide(state, { dt, steer, throttle, sample, hazards }) {
         state.hitCooldown[hazard.id] = 1.15;
         continue;
       }
-      const push = hit.pen + 0.08;
+      const push = hit.pen + 0.4;
       s += (hit.px * forward.x + hit.pz * forward.z) * push;
       offset += (hit.px * sample.right.x + hit.pz * sample.right.z) * push;
       latVel = Math.sign(hit.px * sample.right.x + hit.pz * sample.right.z || 1) * Math.max(3.4, Math.abs(latVel));
       const slow = hazard.kind === "car" ? 0.58 : hazard.kind === "person" ? 0.78 : 0.84;
-      speed *= slow;
+      // Repeated overlaps used to multiply speed down to zero and pin the can inside a car.
+      speed = Math.max(speed * slow, 3.2);
       state.crashes += 1;
       state.shake = 1;
       state.invuln = 0.45;

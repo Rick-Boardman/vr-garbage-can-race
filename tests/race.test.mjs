@@ -15,6 +15,7 @@ import {
 } from "../src/input.js";
 import { createRideState, stepRide } from "../src/drive.js";
 import { START_S } from "../src/constants.js";
+import { facadePush, layFlat, separateLane } from "../src/town.js";
 
 test("the hill drops and the frame stays right-handed", () => {
   const course = createCourse(7);
@@ -184,4 +185,54 @@ test("steering left drifts left, tuck outruns brake, and hits count once", () =>
   stepRide(miss, { dt: 0.05, steer: 0, throttle: 0, sample: sampleCourse(course, miss.s), hazards: [beside] });
   assert.equal(miss.crashes, 0);
   assert.equal(miss.nearMisses, 1);
+
+  const pinned = createRideState(START_S);
+  const pinAt = sampleCourse(course, pinned.s);
+  const pile = { id: "pile", kind: "car", x: pinAt.x, z: pinAt.z, radius: 8 };
+  for (let hit = 0; hit < 8; hit += 1) {
+    pinned.hitCooldown = {};
+    stepRide(pinned, { dt: 0.05, steer: 0, throttle: 0, sample: sampleCourse(course, pinned.s), hazards: [pile] });
+  }
+  assert.ok(pinned.speed >= 3.2, `speed pinned at ${pinned.speed}`);
+});
+
+test("a straight facade stays put and a bowed curb pushes it back", () => {
+  const right = { x: 1, y: 0, z: 0 };
+  const sample = {
+    x: 0, z: 0, halfWidth: 6,
+    forward: { x: 0, y: 0, z: -1 },
+    right,
+  };
+  const straight = { x: 0, z: -6, right, halfWidth: 6 };
+  assert.equal(facadePush(sample, 1, [straight]), 0);
+  const bowed = { x: 2, z: -6, right, halfWidth: 6 };
+  const extra = facadePush(sample, 1, [bowed]);
+  assert.ok(Math.abs(extra - 2) < 1e-6, `extra ${extra}`);
+});
+
+test("cars in one lane keep nine meters between them", () => {
+  const cars = [
+    { lane: 0.36, s: 100, speed: 8 },
+    { lane: 0.36, s: 104, speed: 14 },
+    { lane: -0.36, s: 50, speed: -6 },
+    { lane: -0.36, s: 54, speed: -12 },
+  ];
+  separateLane(cars);
+  const down = cars.filter((car) => car.lane > 0).sort((a, b) => a.s - b.s);
+  const up = cars.filter((car) => car.lane < 0).sort((a, b) => a.s - b.s);
+  assert.ok(down[1].s - down[0].s >= 9);
+  assert.ok(down[0].speed <= 8);
+  assert.ok(up[1].s - up[0].s >= 9);
+  assert.ok(up[1].speed >= -6);
+});
+
+test("a pothole disc lies on the road", () => {
+  const disc = layFlat(new THREE.CircleGeometry(1, 8));
+  const position = disc.attributes.position;
+  let maxY = 0;
+  for (let index = 0; index < position.count; index += 1) {
+    maxY = Math.max(maxY, Math.abs(position.getY(index)));
+  }
+  assert.ok(maxY < 1e-6, `disc still has height ${maxY}`);
+  assert.ok(disc.attributes.normal.getY(0) > 0.9);
 });

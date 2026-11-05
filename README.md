@@ -24,7 +24,7 @@ Grok 4.7 then:
 - Mapped the ride onto that input. A and D steer. W, Shift, and X tuck to go faster. S brakes. V or 1, 2, and 3 switch the camera. N starts a new hill.
 - Built the endless course, three district types, traffic, pedestrians, potholes, the rider, and dawn-to-night lighting. The opening district stays day or dawn so the first stretch is readable. Later districts include dusk and night. Night stays lit enough to play. Buildings, cars, people, and the can are procedural meshes and canvas textures.
 - Fed VR from Halo's controller poses. The lower hand steers to that side. Dropping both controllers speeds up. Raising them slows down. The headset still looks around. Phone tilt uses `DeviceOrientation` after a user gesture, including the iOS permission request. If tilt is denied on a coarse pointer, look offset steers and look pitch throttles.
-- Drew the race readout in Halo's WebGL HUD: a HILL window and a hotbar with CAM, TILT, and NEW. Halo's own debug and help slots stay on the bar.
+- Drew the race readout in Halo's WebGL HUD: a HILL window and a hotbar with CAM, TILT, and NEW. The debug and help slots are not reserved.
 - Checked the desktop build in a browser. The can rolled downhill, A pulled it left, and all three cameras rendered with an empty console. `npm test` covers the downhill frame, the hand and tilt signs, and collisions.
 
 A physical headset and a physical phone were not part of that check. The VR and tilt paths are implemented and unit-tested. They have not been run on a Quest or a handset.

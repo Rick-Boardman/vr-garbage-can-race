@@ -2,7 +2,7 @@
 // the course frame: local -z is travel, local +x is sample.right.
 
 import { applyFrame } from "./frame.js";
-import { frameFromTangent, sampleCourse } from "./course.js";
+import { frameFromTangent, sampleCourse, wrapAngle } from "./course.js";
 import { edgesAlong, ribbonGeometry } from "./road.js";
 import {
   BUILDING_SETBACK,
@@ -10,6 +10,54 @@ import {
   SIDEWALK_CENTER,
   START_S,
 } from "./constants.js";
+
+const LANE_GAP = 9;
+
+export function layFlat(geometry) {
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+// Straight facade corners cut into the sidewalk when the curb bends.
+// Push the front out so each end stays BUILDING_SETBACK past that curb.
+export function facadePush(sample, side, ends) {
+  const front = side * (sample.halfWidth + BUILDING_SETBACK);
+  let extra = 0;
+  for (const end of ends) {
+    const curbX = end.x + end.right.x * side * end.halfWidth;
+    const curbZ = end.z + end.right.z * side * end.halfWidth;
+    const curbLateral = (curbX - sample.x) * sample.right.x + (curbZ - sample.z) * sample.right.z;
+    const gap = side * (front - curbLateral);
+    if (gap < BUILDING_SETBACK) extra = Math.max(extra, BUILDING_SETBACK - gap);
+  }
+  return extra;
+}
+
+// Cars in one lane keep LANE_GAP meters. The leader is the one further along its travel.
+export function separateLane(cars) {
+  const groups = [
+    cars.filter((car) => car.lane < 0),
+    cars.filter((car) => car.lane >= 0),
+  ];
+  for (const group of groups) {
+    if (group.length < 2) continue;
+    const oncoming = group[0].lane < 0;
+    group.sort((a, b) => (oncoming ? a.s - b.s : b.s - a.s));
+    for (let index = 1; index < group.length; index += 1) {
+      const lead = group[index - 1];
+      const follow = group[index];
+      if (oncoming) {
+        if (follow.s < lead.s + LANE_GAP) {
+          follow.s = lead.s + LANE_GAP;
+          follow.speed = Math.max(follow.speed, lead.speed);
+        }
+      } else if (follow.s > lead.s - LANE_GAP) {
+        follow.s = lead.s - LANE_GAP;
+        follow.speed = Math.min(follow.speed, lead.speed);
+      }
+    }
+  }
+}
 import { animatePerson } from "./props.js";
 
 const BEHIND = 36;
@@ -47,7 +95,7 @@ export function createTown(THREE, scene, materials, props) {
   const chunks = new Map();
   const hazards = [];
   const box = new THREE.BoxGeometry(1, 1, 1);
-  const disc = new THREE.CircleGeometry(1, 10);
+  const disc = layFlat(new THREE.CircleGeometry(1, 10));
   box.userData.shared = true;
   disc.userData.shared = true;
 
@@ -159,12 +207,18 @@ export function createTown(THREE, scene, materials, props) {
         else if (theme === "market") building = props.createShop(rand, lit);
         else building = props.createTower(rand, lit);
         const depth = building.userData.depth || 8;
+        const width = building.userData.width || 8;
         const frame = faceStreet(sample, side);
-        const center = side * (sample.halfWidth + BUILDING_SETBACK + depth / 2);
+        const extra = facadePush(sample, side, [
+          sampleCourse(course, s - width / 2),
+          sampleCourse(course, s + width / 2),
+        ]);
+        const front = sample.halfWidth + BUILDING_SETBACK + extra;
+        const center = side * (front + depth / 2);
         place(root, building, sample, center, 0, frame);
         if (theme === "neighborhood") {
           const fence = props.createFence((building.userData.width || 6) * 0.85);
-          place(root, fence, sample, side * (sample.halfWidth + BUILDING_SETBACK - 0.35), 0, frame);
+          place(root, fence, sample, side * (front - 0.45), 0, frame);
           if (rand() > 0.4) {
             const hydrant = props.createHydrant();
             place(root, hydrant, sample, side * (sample.halfWidth + 0.55), 0.14, upright(sample, 1));
@@ -187,7 +241,7 @@ export function createTown(THREE, scene, materials, props) {
       const sample = sampleCourse(course, s);
       if (rand() > 0.45) {
         const tree = props.createTree(rand);
-        place(root, tree, sample, side * (sample.halfWidth + 2.45), 0.14, upright(sample, 1));
+        place(root, tree, sample, side * (sample.halfWidth + 3.6), 0, upright(sample, 1));
       } else {
         const lamp = props.createLamp();
         place(root, lamp, sample, side * (sample.halfWidth + 0.42), 0.14, armTowardStreet(sample, side));
@@ -202,14 +256,22 @@ export function createTown(THREE, scene, materials, props) {
       }
     }
 
-    if (Math.abs(s0 + CHUNK_LENGTH - 8 - START_S) > 14) {
-      for (let stripe = 0; stripe < 6; stripe += 1) {
-        const sample = sampleCourse(course, s1 - 10 + stripe * 0.85);
-        const band = mark(sample.halfWidth * 1.85, 0.035, 0.38, white);
-        place(root, band, sample, 0, 0.03, sample);
+    // Lane pairs share one road frame. A single bar across a bend runs over the curb.
+    const crossS = s1 - 10;
+    const crossA = sampleCourse(course, crossS);
+    const crossB = sampleCourse(course, crossS + 4.2);
+    const bend = Math.abs(wrapAngle(crossA.psi - crossB.psi));
+    if (bend < 0.12 && Math.abs(crossS - START_S) > 14) {
+      for (let stripe = 0; stripe < 4; stripe += 1) {
+        const sample = sampleCourse(course, crossS + stripe * 1.05);
+        for (const side of [-1, 1]) {
+          const band = mark(sample.halfWidth * 0.48, 0.04, 0.3, white);
+          place(root, band, sample, side * sample.halfWidth * 0.46, 0.05, sample);
+        }
       }
     }
 
+    const parked = [];
     for (let s = s0 + 8; s < s1; s += 18) {
       if (rand() > 0.42) continue;
       const side = rand() > 0.5 ? 1 : -1;
@@ -218,19 +280,11 @@ export function createTown(THREE, scene, materials, props) {
       const car = props.createCar(rand, style);
       const dir = rand() > 0.5 ? 1 : -1;
       const frame = frameFromTangent(sample.forward.x * dir, sample.forward.y * dir, sample.forward.z * dir);
-      const offset = side * (sample.halfWidth + 1.12);
-      place(root, car, sample, offset, 0.14, frame);
-      boxHazard(nextId("parked"), "car", sample, offset, frame, 2.15, 0.95);
-    }
-
-    for (let s = s0 + 16; s < s1; s += 28) {
-      if (s < START_S + 20 || rand() > 0.55) continue;
-      const sample = sampleCourse(course, s);
-      const offset = (rand() > 0.5 ? 1 : -1) * (1.6 + rand() * 1.4);
-      const frame = frameFromTangent(sample.forward.x, sample.forward.y, sample.forward.z);
-      const car = props.createCar(rand, "plain");
+      // Outer lane, wheels at the curb. Traffic uses ±0.36 of the half-width and misses these.
+      const offset = side * (sample.halfWidth - 1.15);
       place(root, car, sample, offset, 0, frame);
-      boxHazard(nextId("lane"), "car", sample, offset, frame, 2.15, 0.95);
+      boxHazard(nextId("parked"), "car", sample, offset, frame, 2.15, 0.95);
+      parked.push({ s, side });
     }
 
     for (let s = s0 + 12; s < s1; s += 16) {
@@ -260,6 +314,7 @@ export function createTown(THREE, scene, materials, props) {
       const pose = poses[Math.floor(rand() * poses.length)];
       const side = rand() > 0.5 ? 1 : -1;
       const sample = sampleCourse(course, s);
+      if (pose !== "cross" && parked.some((car) => car.side === side && Math.abs(car.s - s) < 3.4)) continue;
       const sidewalk = side * (sample.halfWidth + SIDEWALK_CENTER);
       if (pose === "cross" && s < START_S + 24) continue;
       const person = props.createPerson(rand, pose === "cross" ? "walk" : pose);
@@ -409,6 +464,9 @@ export function createTown(THREE, scene, materials, props) {
       car.s += car.speed * dt;
       car.roll += Math.abs(car.speed) * dt * 1.6;
       if (car.s < rideS - 45 || car.s > rideS + 190) recycleCar(car, rideS, rand);
+    }
+    separateLane(cars);
+    for (const car of cars) {
       const sample = sampleCourse(course, Math.max(0, car.s));
       const offset = car.lane * sample.halfWidth;
       const dir = car.speed >= 0 ? 1 : -1;

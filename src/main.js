@@ -21,7 +21,7 @@ import {
 
 const BEST_KEY = "garbage-can-race-best";
 const VIEWS = [
-  { id: "first", name: "first person", pivot: 1.05, cam: [0, 0, 0], pitch: 0, showPerson: false },
+  { id: "first", name: "first person", pivot: 1.62, cam: [0, 0, 0.12], pitch: -0.22, showPerson: false },
   { id: "close", name: "just behind", pivot: 0.72, cam: [0, 1.45, 3.35], pitch: -0.32, showPerson: true },
   { id: "far", name: "way back", pivot: 0.9, cam: [0, 4.8, 9.1], pitch: -0.42, showPerson: true },
 ];
@@ -204,6 +204,8 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
+    hotbarSlotCount: 3,
+    reserveSystemHotbarSlots: false,
     onHotbarSlot({ index }) {
       if (index === 0) cycleView();
       else if (index === 1) enableTilt(tiltListening);

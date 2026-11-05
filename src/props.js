@@ -163,7 +163,7 @@ export function createProps(THREE, materials) {
     trunkMesh.position.y = height / 2;
     group.add(trunkMesh);
     const leaf = materials.lambert(rand() > 0.5 ? 0x3e9a45 : 0x2f7a34, { flat: true });
-    const scale = 0.85 + rand() * 0.7;
+    const scale = 0.55 + rand() * 0.28;
     const blob = new THREE.Mesh(foliage, leaf);
     blob.scale.set(scale * 1.15, scale * 0.8, scale);
     blob.position.y = height + scale * 0.35;
