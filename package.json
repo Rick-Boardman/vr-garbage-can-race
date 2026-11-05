@@ -7,7 +7,7 @@
   "author": "Richard Boardman",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Rick-Boardman/vr-garbage-can-race.git"
+    "url": "git+https://github.com/Rick-Boardman/vr-garbage-can-race-dev.git"
   },
   "type": "module",
   "engines": {

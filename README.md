@@ -1,8 +1,10 @@
 # Garbage Can Race
 
+Work on the game continues in this repository. The sealed one-prompt example remains at [vr-garbage-can-race](https://github.com/Rick-Boardman/vr-garbage-can-race) commit `fa35c1f`.
+
 A person sits in a garbage can and rolls an endless hill through a low-poly town. Parked cars, moving cars, people, and potholes get in the way. The road runs through downtown blocks, house rows, and a market street, at dawn, day, dusk, or night.
 
-This repo is a capability demo of two pieces that stay in their own lanes:
+The sealed repository is a capability demo of two pieces that stay in their own lanes:
 
 - **Grok 4.7** took one prompt and built the game on a library it had to read first.
 - **[vr-halo](https://github.com/Rick-Boardman/vr-halo)** (`@rb/halo` 0.2.0) already owned the scene rig, desktop navigation, WebXR session, controllers, and the in-canvas HUD.
