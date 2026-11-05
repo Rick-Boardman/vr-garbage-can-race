@@ -1,0 +1,26 @@
+{
+  "name": "garbage-can-race",
+  "version": "0.1.0",
+  "description": "A person in a garbage can rolls downhill through a procedural town. Built with Grok 4.7 on @rb/halo.",
+  "private": true,
+  "license": "Apache-2.0",
+  "author": "Richard Boardman",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rick-Boardman/vr-garbage-can-race.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "look": "node scripts/look.mjs"
+  },
+  "dependencies": {
+    "@rb/halo": "github:Rick-Boardman/vr-halo#v0.2.0",
+    "three": "0.160.1",
+    "troika-three-text": "0.52.4"
+  }
+}

@@ -1,0 +1,11 @@
+Garbage Can Race
+Copyright 2026 Richard Boardman
+
+Licensed under the Apache License, Version 2.0.
+See LICENSE for the complete terms.
+
+This project depends on @rb/halo (https://github.com/Rick-Boardman/vr-halo),
+Apache-2.0, Copyright 2026 Richard Boardman. three and troika-three-text
+remain under the licenses shipped in those packages.
+
+This NOTICE provides attribution information and does not add license conditions.
