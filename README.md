@@ -4,6 +4,8 @@ Work on the game continues in this repository. The sealed one-prompt example rem
 
 A person stands in a garbage can and rolls an endless hill through a low-poly town. Parked cars, moving cars, people, potholes, and oil slicks get in the way. The road runs through downtown blocks, house rows, a market street, pastures, forest, and the shore, at dawn, day, dusk, or night.
 
+![Garbage Can Race. A rider hangs out of a metal can racing a taxi downhill through a low-poly town at sunset.](docs/hero.png)
+
 The sealed repository is a capability demo of two pieces that stay in their own lanes:
 
 - **Grok 4.7** took one prompt and built the game on a library it had to read first.

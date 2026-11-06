@@ -533,6 +533,16 @@ function tick({ dt }) {
   pending = sampleInput(presenting);
   yawAtFrameEnd = look.getYaw();
   api.ready = api.frameErrors.length === 0 && api.ribbonErrors.length === 0;
+  hideSplash();
+}
+
+function hideSplash() {
+  const splash = document.getElementById("splash");
+  if (!splash || splash.classList.contains("is-gone")) return;
+  splash.classList.add("is-gone");
+  const remove = () => splash.remove();
+  splash.addEventListener("transitionend", remove, { once: true });
+  window.setTimeout(remove, 700);
 }
 
 window.addEventListener("resize", () => {
