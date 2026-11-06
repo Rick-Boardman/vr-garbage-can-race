@@ -47,7 +47,7 @@ import {
   vehicleMayHit,
 } from "../src/town.js";
 import { AWNING_PITCH, BENCH, SIGN_BOARD_Z, SIGN_POLE_Z, SITTER, animatePerson, createFlop, createProps, stepFlop } from "../src/props.js";
-import { releasedLook, tumbleLook } from "../src/look.js";
+import { releasedLook, tumbleLook, undoTouchYaw } from "../src/look.js";
 
 test("the hill drops and the frame stays right-handed", () => {
   const course = createCourse(7);
@@ -480,6 +480,19 @@ test("walkers step aside for a car and for a stationary player", () => {
   assert.ok(personHitByCar({ pose: "walk", s: 20, offset: 1 }, cars));
   assert.equal(personHitByCar({ pose: "fallen", s: 20, offset: 1 }, cars), null);
   assert.equal(personHitByCar({ pose: "walk", s: 20, offset: 6 }, cars), null);
+});
+
+test("a finger dragged left looks left and steers left", () => {
+  // Halo's touch sign turns a leftward finger into a negative yaw.
+  const left = undoTouchYaw(0, -0.4);
+  assert.ok(left > 0.3, `left yaw ${left}`);
+  assert.ok(inputFromLook(left, 0).steer < 0, "drag left steers left");
+  const right = undoTouchYaw(0, 0.4);
+  assert.ok(right < -0.3, `right yaw ${right}`);
+  assert.ok(inputFromLook(right, 0).steer > 0, "drag right steers right");
+  const more = undoTouchYaw(left, left - 0.1);
+  assert.ok(more > left, "holding the drag keeps turning left");
+  assert.ok(Math.abs(undoTouchYaw(1.2, 1.2) - 1.2) < 1e-6);
 });
 
 test("releasing the mouse returns the view to the rider heading", () => {

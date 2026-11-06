@@ -6,7 +6,7 @@ import { START_S } from "./constants.js";
 import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, wrapAngle } from "./course.js";
 import { createDaylight } from "./daylight.js";
 import { createRideState, stepRide, walkerForward } from "./drive.js";
-import { releasedLook, tumbleLook } from "./look.js";
+import { releasedLook, tumbleLook, undoTouchYaw } from "./look.js";
 import { createMaterials } from "./materials.js";
 import { createProps } from "./props.js";
 import { checkRibbonFacesUp } from "./road.js";
@@ -60,6 +60,8 @@ let ride = createRideState(START_S);
 ride.best = readBest();
 let viewIndex = viewParam === "first" ? 0 : viewParam === "far" ? 2 : 1;
 let lastHeading = null;
+let yawAtFrameEnd = null;
+let dragIsTouch = false;
 let pending = { steer: 0, throttle: 0, jump: false, source: "keys" };
 let posed = null;
 let elapsed = 0;
@@ -164,7 +166,9 @@ function startTilt() {
   tiltListening = true;
 }
 
-window.addEventListener("pointerdown", () => {
+window.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "touch") dragIsTouch = true;
+  else if (event.pointerType === "mouse" || event.pointerType === "pen") dragIsTouch = false;
   if (!isCoarse() || tiltListening) return;
   enableTilt(false);
 });
@@ -297,7 +301,15 @@ function updateHud() {
   hudSystem.setWindowLines("race", lines);
 }
 
+function correctTouchDragYaw() {
+  if (!dragIsTouch || yawAtFrameEnd == null || !look) return;
+  const corrected = undoTouchYaw(yawAtFrameEnd, look.getYaw());
+  if (Math.abs(wrapAngle(corrected - look.getYaw())) > 1e-6) look.setYaw(corrected);
+}
+
 function placeWorld(presenting) {
+  // A finger drag has to be turned around before face and steer read it.
+  correctTouchDragYaw();
   const ejected = ride.eject;
   const followS = ejected ? ejected.bodyS : ride.s;
   const followOffset = ejected ? ejected.bodyOffset : ride.offset;
@@ -519,6 +531,7 @@ function tick({ dt }) {
   }
   renderHudFrame({ renderer, scene, camera, dt: step, hudSystem, navigation });
   pending = sampleInput(presenting);
+  yawAtFrameEnd = look.getYaw();
   api.ready = api.frameErrors.length === 0 && api.ribbonErrors.length === 0;
 }
 
@@ -530,6 +543,7 @@ window.addEventListener("resize", () => {
 });
 
 placeWorld(false);
+yawAtFrameEnd = look.getYaw();
 updateHud();
 town.update(course, ride.s, 0, 0, { s: ride.s, offset: ride.offset, radius: 0.5 });
 
