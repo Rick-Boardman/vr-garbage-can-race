@@ -243,23 +243,27 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
     eject.canHop = 0;
     eject.canVy = Math.abs(eject.canVy) > 0.9 ? -eject.canVy * 0.55 : 0;
   }
-  // The empty can still coasts. The old drag killed the roll as soon as the rider left.
+  // The throw carries the can while it is in the air. On the road, friction
+  // stops it. A hill used to keep a settled can sliding, and on a steep grade
+  // that slide never ended.
   const coast = canSample || sample;
-  if ((eject.canSpeed || 0) > 0.5 && coast) {
-    const grade = Math.max(0, coast.slope || 0);
-    eject.canSpeed += GRAVITY * Math.sin(grade) * 0.12 * step;
+  const canGrounded = eject.canHop < 0.04 && Math.abs(eject.canVy) < 0.35;
+  if (canGrounded) {
+    eject.canSpeed = Math.max(0, eject.canSpeed || 0) * Math.exp(-2.6 * step);
+    eject.canLat *= Math.exp(-4 * step);
+    if (coast && Math.abs(eject.canOffset) > (coast.halfWidth || 0) - 0.35) {
+      eject.canSpeed *= Math.exp(-1.6 * step);
+    }
+    if (eject.canSpeed < 0.2) eject.canSpeed = 0;
+    if (Math.abs(eject.canLat) < 0.2) eject.canLat = 0;
+  } else {
+    eject.canSpeed = Math.max(0, eject.canSpeed || 0) * Math.exp(-0.2 * step);
+    eject.canLat *= Math.exp(-0.35 * step);
   }
-  eject.canSpeed = Math.max(0, eject.canSpeed || 0) * Math.exp(-0.32 * step);
-  if (coast && Math.abs(eject.canOffset) > (coast.halfWidth || 0) - 0.35) {
-    eject.canSpeed *= Math.exp(-1.2 * step);
-  }
-  eject.canLat *= Math.exp(-0.7 * step);
   eject.canS += eject.canSpeed * step;
   eject.canOffset = clamp(eject.canOffset + eject.canLat * step, -hard, hard);
-  // A steep grade keeps a slow coast above the old "fully stopped" test, so the
-  // tilt never snapped and ground clearance held the can in the air. Once it is
-  // on the road, lock it to its bottom, top, or a side. It may still roll.
-  const canGrounded = eject.canHop < 0.04 && Math.abs(eject.canVy) < 0.35;
+  // On the road, sit on the bottom, the top, or a side. A corner pose plus
+  // ground clearance holds the can in the air.
   if (canGrounded) {
     eject.canTilt = restCanTilt(eject.canTilt || 0);
     if (Math.abs(eject.canSpeed) < 0.45 && Math.abs(eject.canLat) < 0.45) {

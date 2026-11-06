@@ -1,11 +1,12 @@
 // Streaming low-poly blocks along the downhill. Props and colliders share
 // the course frame: local -z is travel, local +x is sample.right.
 
+import * as THREE from "three";
 import { applyFrame } from "./frame.js";
 import { frameFromTangent, sampleCourse, wrapAngle } from "./course.js";
 import { edgesAlong, ribbonGeometry } from "./road.js";
 import { restCanTilt } from "./drive.js";
-import { SITTER, animatePerson, createFlop, stepFlop } from "./props.js";
+import { SITTER, animatePerson, createFlop, isStepping, poseForTravel, stepFlop } from "./props.js";
 import {
   BUILDING_SETBACK,
   CHUNK_LENGTH,
@@ -326,8 +327,41 @@ function chunkSeed(courseSeed, index) {
   return (Math.imul(index + 1, 0x9e3779b1) ^ (courseSeed >>> 0)) >>> 0;
 }
 
-function faceStreet(sample, side) {
+export function faceStreet(sample, side) {
   return frameFromTangent(-side * sample.right.x, 0, -side * sample.right.z);
+}
+
+// Sidewalk grass starts just past halfWidth + 3.25. The front rail stands
+// there, and never closer than this to the facade, so the stoop stays inside.
+export const YARD_FENCE_FROM_CURB = 3.48;
+export const YARD_CLEAR_OF_FACE = 1.45;
+// Neighborhood and country lots sit this much farther back than a street wall,
+// which leaves a yard between the walk and the door.
+export const HOUSE_YARD_SETBACK = 2.8;
+
+export function yardFenceLine(halfWidth, front) {
+  const onGrass = halfWidth + YARD_FENCE_FROM_CURB;
+  const clearOfDoor = front - YARD_CLEAR_OF_FACE;
+  return Math.min(onGrass, clearOfDoor);
+}
+
+const yardShear = new THREE.Matrix4();
+
+// Local +x of a street-facing yard runs horizontally along the road, in the
+// side * travel direction. The ground falls with forward.y.
+// Check: side 1 and forward.y < 0 → shear < 0, so the +x end drops.
+export function yardGradeShear(forward, side) {
+  const horizontal = Math.hypot(forward.x, forward.z) || 1;
+  return side * forward.y / horizontal;
+}
+
+// Drop each end onto the hill without leaning the posts. A rigid tilt would
+// tip them. Shear keeps local Y as world up and moves Y with local X.
+export function slopeWithGrade(object, shear) {
+  object.updateMatrix();
+  object.matrix.multiply(yardShear.makeShear(shear, 0, 0, 0, 0, 0));
+  object.matrixAutoUpdate = false;
+  object.matrixWorldNeedsUpdate = true;
 }
 
 function armTowardStreet(sample, side) {
@@ -684,16 +718,43 @@ export function createTown(THREE, scene, materials, props) {
           sampleCourse(course, s - width / 2),
           sampleCourse(course, s + width / 2),
         ]);
-        const front = sample.halfWidth + BUILDING_SETBACK + extra;
+        const lot = theme === "neighborhood" || theme === "country" ? HOUSE_YARD_SETBACK : 0;
+        const front = sample.halfWidth + BUILDING_SETBACK + lot + extra;
         const center = side * (front + depth / 2);
         place(root, building, sample, center, 0, frame);
         addBox(sample, center, width / 2, depth / 2);
         if (theme === "neighborhood" || theme === "country") {
-          const fenceLength = (building.userData.width || 6) * 0.85;
-          const fence = props.createFence(fenceLength);
-          const fenceOffset = side * (front - 0.45);
-          place(root, fence, sample, fenceOffset, 0, frame);
-          addBox(sample, fenceOffset, fenceLength / 2, 0.2);
+          const line = yardFenceLine(sample.halfWidth, front);
+          const yardDepth = Math.max(YARD_CLEAR_OF_FACE, front - line);
+          const fence = props.createYardFence({
+            width,
+            depth,
+            doorX: building.userData.doorX || 0,
+            yardDepth,
+          });
+          place(root, fence, sample, center, 0.02, frame);
+          slopeWithGrade(fence, yardGradeShear(sample.forward, side));
+          for (const run of fence.userData.yard.runs) {
+            if (run.axis === "x") {
+              const mid = (run.x0 + run.x1) / 2;
+              const length = run.x1 - run.x0;
+              solids.push({
+                s: sample.s + side * mid,
+                offset: side * (front + depth / 2 + run.z),
+                halfL: length / 2,
+                halfW: 0.16,
+              });
+            } else {
+              const midZ = (run.z0 + run.z1) / 2;
+              const length = run.z1 - run.z0;
+              solids.push({
+                s: sample.s + side * run.x,
+                offset: side * (front + depth / 2 + midZ),
+                halfL: 0.16,
+                halfW: length / 2,
+              });
+            }
+          }
           if (rand() > 0.4) {
             const hydrant = props.createHydrant();
             const hydrantOffset = side * (sample.halfWidth + 0.55);
@@ -749,7 +810,8 @@ export function createTown(THREE, scene, materials, props) {
         const sample = sampleCourse(course, s);
         if (rand() > 0.45) {
           const tree = props.createTree(rand);
-          const treeOffset = side * (sample.halfWidth + 3.6);
+          const verge = theme === "neighborhood" || theme === "country" ? 5.5 : 3.6;
+          const treeOffset = side * (sample.halfWidth + verge);
           place(root, tree, sample, treeOffset, 0, upright(sample, 1));
           addBlock(sample, treeOffset, 1.05);
         } else {
@@ -1209,6 +1271,7 @@ export function createTown(THREE, scene, materials, props) {
 
   let activeCourse = null;
   let activeTime = 0;
+  let activeDt = 0;
 
   function fillSlot(slot, fields) {
     slot.id = fields.id;
@@ -1267,8 +1330,24 @@ export function createTown(THREE, scene, materials, props) {
     }
   }
 
+  function noteTravel(actor) {
+    const step = activeDt > 1e-4 ? activeDt : 0;
+    if (!(step > 0) || actor.seenS == null) {
+      actor.seenS = actor.s;
+      actor.seenOffset = actor.offset;
+      actor.travel = 0;
+      return;
+    }
+    const along = actor.s - actor.seenS;
+    const across = actor.offset - actor.seenOffset;
+    actor.seenS = actor.s;
+    actor.seenOffset = actor.offset;
+    actor.travel = Math.hypot(along, across) / step;
+  }
+
   function refreshActor(actor, course, time) {
     if (actor.fixed || !actor.group) return;
+    noteTravel(actor);
     const sample = sampleCourse(course, actor.s);
     const lift = actor.pose === "bounce"
       ? 0.14 + Math.max(0, actor.hop || 0)
@@ -1276,7 +1355,7 @@ export function createTown(THREE, scene, materials, props) {
         ? 0.08
         : 0.14;
     placeActor(actor, sample, actor.offset, lift);
-    if (actor.kind === "animal" && actor.pose !== "fallen" && actor.pose !== "bounce") {
+    if (actor.kind === "animal" && actor.pose !== "fallen" && actor.pose !== "bounce" && isStepping(actor.travel)) {
       const bob = Math.sin(time * 3.4 + (actor.phase || 0));
       actor.group.rotateX(bob * 0.1);
       actor.group.position.y += Math.abs(bob) * 0.045;
@@ -1284,6 +1363,8 @@ export function createTown(THREE, scene, materials, props) {
     if ((actor.pose === "fallen" || actor.pose === "bounce") && actor.group.userData) {
       actor.group.userData.flop = actor.flop || null;
       actor.group.userData.pose = actor.flop ? "ragdoll" : "fallen";
+    } else if (actor.group.userData?.limbs && (actor.pose === "walk" || actor.pose === "cross")) {
+      actor.group.userData.pose = poseForTravel(actor.pose, actor.travel);
     }
     if (actor.group.userData?.limbs) animatePerson(actor.group, time);
   }
@@ -1458,6 +1539,7 @@ export function createTown(THREE, scene, materials, props) {
   function update(course, rideS, dt, time, player) {
     activeCourse = course;
     activeTime = time;
+    activeDt = Math.max(0, dt || 0);
     // The camera stays with the body. Traffic recycles around that, not around
     // an empty can that has rolled ahead, or the street in view goes quiet.
     const viewS = player && Number.isFinite(player.s) ? player.s : rideS;

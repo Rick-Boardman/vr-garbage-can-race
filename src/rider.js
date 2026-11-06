@@ -1,5 +1,5 @@
 import { applyFrame } from "./frame.js";
-import { animatePerson } from "./props.js";
+import { animatePerson, onFootPose } from "./props.js";
 
 // The shell is built with its origin on the road. Spinning that origin
 // swings the rim through the asphalt. Lift along the road normal so the
@@ -119,6 +119,7 @@ export function createRider(THREE, materials, props) {
     bodyRoll = 0,
     facing,
     showPerson = true,
+    moving = false,
   }) {
     root.position.set(0, 0, 0);
     root.quaternion.identity();
@@ -160,7 +161,7 @@ export function createRider(THREE, materials, props) {
       const dip = Math.min(minY, 0) - rollDip;
       if (dip < 0) person.position.y -= dip;
     }
-    person.userData.pose = tumbling ? "tumble" : "walk";
+    person.userData.pose = onFootPose({ tumbling, moving });
     person.visible = showPerson;
     shadow.position.set(person.position.x, bodySample.y + 0.04, person.position.z);
   }

@@ -6,6 +6,7 @@ import { createCourse, checkCourseFrame, frameFromTangent, headingYaw, sampleCou
 import { checkRibbonFacesUp } from "../src/road.js";
 import { applyFrame } from "../src/frame.js";
 import {
+  footDragStick,
   inputFromHands,
   inputFromKeys,
   inputFromLook,
@@ -17,12 +18,14 @@ import {
 } from "../src/input.js";
 import { createRideState, restCanTilt, stepRide, walkerForward } from "../src/drive.js";
 import { canGroundClearance, createRider } from "../src/rider.js";
-import { DISTRICT_LENGTH, START_S } from "../src/constants.js";
+import { BUILDING_SETBACK, DISTRICT_LENGTH, START_S } from "../src/constants.js";
 import {
   busPace,
   clearOf,
   closingOn,
   facadePush,
+  faceStreet,
+  HOUSE_YARD_SETBACK,
   lateralEvade,
   launchVelocity,
   layFlat,
@@ -45,8 +48,11 @@ import {
   TRAFFIC_FLEET,
   vehicleHitsLife,
   vehicleMayHit,
+  yardFenceLine,
+  yardGradeShear,
+  slopeWithGrade,
 } from "../src/town.js";
-import { AWNING_PITCH, BENCH, SIGN_BOARD_Z, SIGN_POLE_Z, SITTER, animatePerson, createFlop, createProps, stepFlop } from "../src/props.js";
+import { AWNING_PITCH, BENCH, SIGN_BOARD_Z, SIGN_POLE_Z, SITTER, animatePerson, createFlop, createProps, onFootPose, poseForTravel, stepFlop } from "../src/props.js";
 import { createDaylight } from "../src/daylight.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "../src/look.js";
 
@@ -426,6 +432,133 @@ test("the awning drops toward the street and the sign pole stands behind the boa
   assert.ok(SIGN_POLE_Z > SIGN_BOARD_Z);
 });
 
+test("a yard fence stands off the door and the gate is open", () => {
+  const half = 6.1;
+  const front = half + BUILDING_SETBACK + HOUSE_YARD_SETBACK;
+  const line = yardFenceLine(half, front);
+  assert.ok(line > half + 3.25, `fence on the sidewalk ${line}`);
+  assert.ok(front - line > 3, `yard only ${front - line}`);
+  const close = yardFenceLine(half, half + BUILDING_SETBACK);
+  assert.ok(half + BUILDING_SETBACK - close >= 1.45 - 1e-6);
+
+  const props = createProps(THREE, { lambert: () => new THREE.MeshLambertMaterial() });
+  const house = props.createHouse(() => 0.5);
+  const { width, depth, doorX } = house.userData;
+  const yardDepth = front - line;
+  const fence = props.createYardFence({ width, depth, doorX, yardDepth });
+  const yard = fence.userData.yard;
+  const faceZ = -depth / 2;
+  assert.ok(Math.abs(yard.frontZ - (faceZ - yardDepth)) < 1e-6);
+  assert.ok(yard.wallZ < faceZ - 0.2, "side rails meet the wall");
+  const frontRuns = yard.runs.filter((run) => run.axis === "x");
+  assert.equal(frontRuns.length, 2);
+  assert.ok(frontRuns.every((run) => doorX <= run.x0 - 0.2 || doorX >= run.x1 + 0.2));
+  assert.equal(yard.runs.filter((run) => run.axis === "z").length, 2);
+
+  fence.updateMatrixWorld(true);
+  let blockedGate = false;
+  let reachedStreet = false;
+  let reachedSide = false;
+  fence.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry?.attributes?.position) return;
+    const pos = obj.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      if (y < 0.12) continue;
+      if (z < yard.frontZ + 0.15) reachedStreet = true;
+      if (Math.abs(Math.abs(x) - width / 2) < 0.25 && z > yard.frontZ + 0.4) reachedSide = true;
+      if (Math.abs(x - doorX) < 0.4 && z < yard.frontZ + 0.2) blockedGate = true;
+    }
+  });
+  assert.equal(blockedGate, false);
+  assert.equal(reachedStreet, true);
+  assert.equal(reachedSide, true);
+
+  const side = 1;
+  const frame = faceStreet({ right: { x: 1, y: 0, z: 0 } }, side);
+  const center = side * (front + depth / 2);
+  const marker = new THREE.Object3D();
+  marker.position.set(center, 0, 0);
+  applyFrame(marker, frame);
+  const door = new THREE.Object3D();
+  door.position.set(doorX, 0.9, faceZ - 0.08);
+  const rail = new THREE.Object3D();
+  rail.position.set(doorX, 0.5, yard.frontZ);
+  marker.add(door, rail);
+  marker.updateMatrixWorld(true);
+  const doorAt = new THREE.Vector3();
+  const railAt = new THREE.Vector3();
+  door.getWorldPosition(doorAt);
+  rail.getWorldPosition(railAt);
+  const towardStreet = railAt.clone().sub(doorAt);
+  assert.ok(towardStreet.x < -1.2, `fence x ${towardStreet.x} is not toward the street`);
+  assert.ok(Math.abs(railAt.x) < Math.abs(doorAt.x), "rail is closer to the road than the door");
+});
+
+test("a yard fence drops with the hill and its posts stay upright", () => {
+  const course = createCourse(9);
+  const sample = sampleCourse(course, 50);
+  assert.ok(sample.forward.y < -0.04, `forward.y ${sample.forward.y}`);
+  for (const side of [1, -1]) {
+    const shear = yardGradeShear(sample.forward, side);
+    assert.equal(Math.sign(shear), -side);
+    const fence = new THREE.Group();
+    const downhillX = side > 0 ? 3.5 : -3.5;
+    const base = new THREE.Object3D();
+    base.position.set(downhillX, 0, -2);
+    const top = new THREE.Object3D();
+    top.position.set(downhillX, 1, -2);
+    const uphill = new THREE.Object3D();
+    uphill.position.set(-downhillX, 0, -2);
+    fence.add(base, top, uphill);
+    fence.position.set(sample.x, sample.y, sample.z);
+    applyFrame(fence, faceStreet(sample, side));
+    slopeWithGrade(fence, shear);
+    fence.updateMatrixWorld(true);
+    const downAt = new THREE.Vector3();
+    const topAt = new THREE.Vector3();
+    const upAt = new THREE.Vector3();
+    base.getWorldPosition(downAt);
+    top.getWorldPosition(topAt);
+    uphill.getWorldPosition(upAt);
+    const groundDown = sampleCourse(course, sample.s + 3.5);
+    const groundUp = sampleCourse(course, sample.s - 3.5);
+    assert.ok(Math.abs(downAt.y - groundDown.y) < 0.25, `side ${side} down ${downAt.y} ground ${groundDown.y}`);
+    assert.ok(Math.abs(upAt.y - groundUp.y) < 0.25, `side ${side} up ${upAt.y} ground ${groundUp.y}`);
+    assert.ok(downAt.y < upAt.y - 0.25, `side ${side} downhill is not lower`);
+    const rise = topAt.clone().sub(downAt);
+    assert.ok(rise.y > 0.95, `side ${side} post rise y ${rise.y}`);
+    assert.ok(Math.hypot(rise.x, rise.z) < 0.08, `side ${side} post leans ${Math.hypot(rise.x, rise.z)}`);
+  }
+});
+
+test("a bench stands on four legs", () => {
+  const props = createProps(THREE, { lambert: () => new THREE.MeshLambertMaterial() });
+  const bench = props.createBench();
+  bench.updateMatrixWorld(true);
+  const point = new THREE.Vector3();
+  const feet = [];
+  bench.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry?.attributes?.position) return;
+    const pos = obj.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 1) {
+      point.fromBufferAttribute(pos, i).applyMatrix4(obj.matrixWorld);
+      if (point.y < 0.05) feet.push(point.clone());
+    }
+  });
+  assert.ok(feet.length >= 8, `feet ${feet.length}`);
+  for (const foot of feet) {
+    assert.ok(Math.abs(foot.x) > 0.45, `leg x ${foot.x}`);
+    assert.ok(Math.abs(foot.z) < 0.25, `leg z ${foot.z}`);
+  }
+  const xs = feet.map((foot) => Math.sign(foot.x));
+  const zs = feet.map((foot) => Math.sign(foot.z));
+  assert.ok(xs.includes(1) && xs.includes(-1), "legs on both ends");
+  assert.ok(zs.includes(1) && zs.includes(-1), "legs on both sides");
+});
+
 test("a sitter faces the street and the rider's hands reach forward", () => {
   assert.ok(SITTER.z < BENCH.backZ);
   assert.ok(SITTER.z > -0.23);
@@ -494,6 +627,68 @@ test("a finger dragged left looks left and steers left", () => {
   const more = undoTouchYaw(left, left - 0.1);
   assert.ok(more > left, "holding the drag keeps turning left");
   assert.ok(Math.abs(undoTouchYaw(1.2, 1.2) - 1.2) < 1e-6);
+});
+
+test("on foot, a finger dragged up walks forward and does not steer", () => {
+  const forward = footDragStick({ ejected: true, dragging: true, touch: true, pitch: -0.38 });
+  assert.ok(forward.throttle > 0.9, `throttle ${forward.throttle}`);
+  assert.equal(forward.steer, 0);
+  assert.equal(forward.strafe, 0);
+  const back = footDragStick({ ejected: true, dragging: true, touch: true, pitch: 0.38 });
+  assert.ok(back.throttle < -0.9, `back throttle ${back.throttle}`);
+  assert.equal(footDragStick({ ejected: true, dragging: true, touch: false, pitch: -0.38 }), null);
+  assert.equal(footDragStick({ ejected: true, dragging: false, touch: true, pitch: -0.38 }), null);
+  assert.equal(footDragStick({ ejected: false, dragging: true, touch: true, pitch: -0.38 }), null);
+
+  const tilt = inputFromTilt({ steerDeg: 20, leanDeg: 20, neutralSteer: 0, neutralLean: 0 });
+  const held = selectRideInput({
+    presenting: false,
+    tilt: null,
+    keys: { steer: 0, throttle: forward.throttle, strafe: 0 },
+    preferTilt: false,
+  });
+  assert.equal(held.source, "keys");
+  assert.ok(held.throttle > 0.9);
+  const stolen = selectRideInput({
+    presenting: false,
+    tilt,
+    keys: { steer: 0, throttle: forward.throttle, strafe: 0 },
+    preferTilt: true,
+  });
+  assert.equal(stolen.source, "tilt");
+
+  const course = createCourse(7);
+  const state = createRideState(80);
+  state.speed = 12;
+  const at = sampleCourse(course, 80);
+  stepRide(state, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    sample: at,
+    hazards: [{ id: "truck", kind: "car", x: at.x, z: at.z, radius: 3 }],
+  });
+  assert.ok(state.eject);
+  state.eject.face = 0;
+  state.eject.bodyAlong = 0;
+  state.eject.bodyLat = 0;
+  state.eject.bodyHop = 0;
+  state.eject.bodyVy = 0;
+  state.eject.bodySpin = 0;
+  state.eject.bodyRoll = 0;
+  state.eject.canS = state.eject.bodyS + 40;
+  const before = state.eject.bodyS;
+  const faced = state.eject.face;
+  stepRide(state, {
+    dt: 0.05,
+    steer: forward.steer,
+    throttle: forward.throttle,
+    strafe: forward.strafe,
+    sample: sampleCourse(course, state.s),
+    hazards: [],
+  });
+  assert.equal(state.eject.face, faced, "a forward drag does not turn");
+  assert.ok(state.eject.bodyS > before + 0.05, `downhill s ${state.eject.bodyS} from ${before}`);
 });
 
 test("releasing the mouse returns the view to the rider heading", () => {
@@ -969,7 +1164,31 @@ test("a resting can sits on its bottom, top, or side", () => {
     hazards: [],
   });
   assert.equal(state.eject.canTilt, Math.PI / 2);
-  assert.ok(state.eject.canSpeed > 0.4, "a grounded can may still coast");
+  for (let step = 0; step < 100; step += 1) {
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 0,
+      sample: sampleCourse(course, state.s),
+      canSample: sampleCourse(course, state.eject.canS),
+      hazards: [],
+    });
+  }
+  assert.equal(state.eject.canSpeed, 0);
+  assert.equal(state.eject.canLat, 0);
+  assert.equal(state.eject.canTilt, Math.PI / 2);
+  const parked = state.eject.canS;
+  for (let step = 0; step < 40; step += 1) {
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 0,
+      sample: sampleCourse(course, state.s),
+      canSample: sampleCourse(course, state.eject.canS),
+      hazards: [],
+    });
+  }
+  assert.equal(state.eject.canS, parked, "a grounded can slid after it stopped");
 });
 
 test("an ejected can falls out of a bus instead of climbing", () => {
@@ -1240,7 +1459,7 @@ test("space hops out of the can without a crash", () => {
   assert.ok(Math.abs(state.eject.bodyOffset - state.eject.canOffset) > 0.9, "landed back in the can");
   assert.ok(Math.abs(state.eject.canSpeed) > 4, "can stopped");
   const started = state.eject.canS;
-  for (let step = 0; step < 30; step += 1) {
+  for (let step = 0; step < 8; step += 1) {
     stepRide(state, {
       dt: 0.05,
       steer: 0,
@@ -1251,8 +1470,32 @@ test("space hops out of the can without a crash", () => {
     });
   }
   assert.ok(state.eject, "hop remounted itself");
-  assert.ok(state.eject.canS > started + 3, `rolled ${state.eject.canS - started}`);
-  assert.ok(state.eject.canSpeed > 1.2, `coasted ${state.eject.canSpeed}`);
+  assert.ok(state.eject.canS > started + 0.4, `never left the hop ${state.eject.canS - started}`);
+  for (let step = 0; step < 120; step += 1) {
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 0,
+      sample: sampleCourse(course, state.s),
+      canSample: sampleCourse(course, state.eject.canS),
+      hazards: [],
+    });
+  }
+  assert.equal(state.eject.canSpeed, 0);
+  assert.equal(state.eject.canLat, 0);
+  const stopped = state.eject.canS;
+  assert.ok(stopped < started + 14, `slid ${stopped - started}`);
+  for (let step = 0; step < 40; step += 1) {
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 0,
+      sample: sampleCourse(course, state.s),
+      canSample: sampleCourse(course, state.eject.canS),
+      hazards: [],
+    });
+  }
+  assert.equal(state.eject.canS, stopped, "can slid after it stopped");
 });
 
 test("a cone hit asks the cone to fly", () => {
@@ -1406,6 +1649,40 @@ test("a thrown person flops and a truck has a cab, bed, and grille", () => {
   const bus = props.createCar(() => 0.5, "bus");
   assert.ok(bus.getObjectByName("muffler"), "bus muffler");
   assert.equal(bus.userData.exhaust.smoke, false);
+});
+
+test("a still person stands and a moving one walks", () => {
+  assert.equal(poseForTravel("walk", 0), "stand");
+  assert.equal(poseForTravel("cross", 0.05), "stand");
+  assert.equal(poseForTravel("walk", 0.8), "walk");
+  assert.equal(poseForTravel("talk", 0), "talk");
+  assert.equal(poseForTravel("phone", 0), "phone");
+  assert.equal(onFootPose({ tumbling: false, moving: false }), "stand");
+  assert.equal(onFootPose({ tumbling: false, moving: true }), "walk");
+  assert.equal(onFootPose({ tumbling: true, moving: false }), "tumble");
+
+  const props = createProps(THREE, { lambert: () => new THREE.MeshLambertMaterial() });
+  const person = props.createPerson(() => 0.2, "stand");
+  const dog = new THREE.Group();
+  dog.position.y = 0.2;
+  person.userData.dog = dog;
+  animatePerson(person, 0.2);
+  const thigh = person.userData.limbs.legL.rotation.x;
+  const knee = person.userData.limbs.kneeL.rotation.x;
+  animatePerson(person, 1.7);
+  assert.equal(person.userData.limbs.legL.rotation.x, thigh);
+  assert.equal(person.userData.limbs.kneeL.rotation.x, knee);
+  assert.ok(Math.abs(thigh) < 0.05, `standing thigh ${thigh}`);
+  assert.ok(knee > -0.1, `standing knee ${knee}`);
+  assert.equal(dog.position.y, 0);
+
+  person.userData.pose = "walk";
+  person.position.y = 0;
+  animatePerson(person, 0.2);
+  const stepping = person.userData.limbs.legL.rotation.x;
+  person.position.y = 0;
+  animatePerson(person, 0.55);
+  assert.notEqual(person.userData.limbs.legL.rotation.x, stepping);
 });
 
 test("a walker bends the forward knee and a tree is a cluster", () => {

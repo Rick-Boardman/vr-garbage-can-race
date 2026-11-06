@@ -13,6 +13,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import {
+  footDragStick,
   inputFromHands,
   inputFromKeys,
   inputFromLook,
@@ -259,7 +260,7 @@ player = boot.rig.player;
 hudSystem.setHelpOverrideLines([
   "A / D steer. W, Shift, or X tuck. S brakes. Space hops out.",
   "On foot, A/D strafe. Q/E turn. W walks the way you face. Space jumps.",
-  "Drag looks around while riding. On foot, dragging turns you.",
+  "Drag looks around while riding. On foot, drag a finger to walk and turn.",
   "V or 1 2 3 changes the camera. N starts a new hill.",
   "VR: lower the left controller to steer left, the right to steer right.",
   "Lower both controllers to speed up. Raise them to lean back and brake.",
@@ -305,7 +306,7 @@ function updateHud() {
     `seed ${course.seed} · ${pending.source}`,
   );
   if (ride.eject) {
-    lines.unshift("A/D strafe. Q/E turn. W walks. Space jumps.");
+    lines.unshift("A/D strafe. Q/E turn. Drag walks. Space jumps.");
     lines.unshift("Get back in the can");
   } else {
     lines.unshift("Space hops out of the can");
@@ -345,9 +346,12 @@ function placeWorld(presenting) {
   const heading = facing
     ? headingYaw(facing.x, facing.z)
     : headingYaw(posed.forward.x, posed.forward.z);
+  // A touch drag holds its pitch for the whole press. Zeroing it here
+  // threw the walk stick away before sampleInput could read it.
+  const fingerDown = ejected && !presenting && dragging && dragIsTouch;
   if (ejected && !presenting) {
     look.setYaw(heading);
-    look.setPitch(0);
+    if (!fingerDown) look.setPitch(0);
     look.setRoll(0);
   } else if (lastHeading == null || presenting) {
     look.setYaw(heading);
@@ -395,6 +399,8 @@ function placeWorld(presenting) {
       bodyRoll: ejected.bodyRoll || 0,
       facing,
       showPerson: view.showPerson && !presenting,
+      moving: Math.hypot(pending.throttle || 0, pending.strafe || 0) > 0.08
+        || Math.hypot(ejected.bodyAlong || 0, ejected.bodyLat || 0) > 0.35,
     });
   } else {
     const bank = Math.max(-0.35, Math.min(0.35, -ride.latVel * 0.05));
@@ -433,15 +439,37 @@ function placeWorld(presenting) {
       camera.fov = fov;
       camera.updateProjectionMatrix();
     }
+    // Halo sizes this quad once, from the field of view at boot. A toss
+    // drops speed to 0 and the view narrows, so the same quad sticks out
+    // past the top-left and the title bar leaves the screen.
+    fitHudToCamera();
   }
 
   const lighting = daylight.apply(course, ride.s, player.position);
   materials.syncNight(lighting.night);
 }
 
+function fitHudToCamera() {
+  const root = hudSystem?.hud?.root;
+  if (!root || !camera) return;
+  const distance = Math.abs(root.position.z);
+  if (!(distance > 0.05)) return;
+  const fovRad = THREE.MathUtils.degToRad(camera.fov);
+  const viewH = 2 * distance * Math.tan(fovRad / 2);
+  const aspect = camera.aspect > 0 ? camera.aspect : 1;
+  root.scale.set(viewH * aspect, viewH, 1);
+}
+
 function sampleInput(presenting) {
   const yawOffset = wrapAngle(look.getYaw() - (lastHeading ?? 0));
-  const lookSteer = isCoarse() && !latestTilt && !presenting
+  const dragging = !!navigation?.isLookDragging;
+  const finger = footDragStick({
+    ejected: !!ride.eject,
+    dragging,
+    touch: dragIsTouch,
+    pitch: look.getPitch(),
+  });
+  const lookSteer = !finger && isCoarse() && !latestTilt && !presenting
     ? inputFromLook(yawOffset, look.getPitch())
     : null;
   const keys = inputFromKeys({
@@ -449,19 +477,19 @@ function sampleInput(presenting) {
     autoWalk: navigation.autoWalk,
     lookSteer,
   });
-  const dragging = !!navigation?.isLookDragging;
   if (ride.eject) {
     keys.strafe = keys.steer;
     keys.steer = dragging ? 0 : onFootSteer(0, navigation.keysDown);
   } else {
     keys.strafe = 0;
   }
+  if (finger && keys.throttle === 0) keys.throttle = finger.throttle;
   const selected = selectRideInput({
     presenting,
     hands: presenting ? readHands(controllers, camera) : null,
-    tilt: latestTilt,
+    tilt: finger ? null : latestTilt,
     keys,
-    preferTilt: isCoarse() && !!latestTilt,
+    preferTilt: !finger && isCoarse() && !!latestTilt,
   });
   selected.jump = onFootJump(navigation.keysDown);
   selected.strafe = ride.eject ? (keys.strafe || 0) : 0;
@@ -499,6 +527,10 @@ function noteFrame() {
 
 function tick({ dt }) {
   noteFrame();
+  tickBody(dt);
+}
+
+function tickBody(dt) {
   const step = Math.min(Math.max(dt || 0, 0), 0.05);
   elapsed += step;
   const presenting = !!renderer.xr?.isPresenting;

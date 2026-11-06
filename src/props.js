@@ -64,6 +64,26 @@ function setElbow(elbow, bend) {
   elbow.rotation.x = Math.max(0, bend);
 }
 
+const WALK_SPEED_MIN = 0.12;
+
+// Legs swing only while the body is actually moving. A blocked walker or a
+// crosser waiting for a gap stands. Talk, phone, and sit keep their own pose.
+// Check: speed 0 → "stand". speed 0.8 → "walk". "talk" stays "talk".
+export function poseForTravel(behavior, speed) {
+  if (behavior !== "walk" && behavior !== "cross") return behavior;
+  return isStepping(speed) ? "walk" : "stand";
+}
+
+export function isStepping(speed) {
+  return (Number(speed) || 0) > WALK_SPEED_MIN;
+}
+
+// On foot, a settled body stands. A step or a slide walks. A throw tumbles.
+export function onFootPose({ tumbling = false, moving = false } = {}) {
+  if (tumbling) return "tumble";
+  return poseForTravel("walk", moving ? 1 : 0);
+}
+
 export function animatePerson(group, time) {
   const limbs = group.userData.limbs;
   if (!limbs) return;
@@ -141,6 +161,19 @@ export function animatePerson(group, time) {
     setElbow(limbs.elbowL, 0.6);
     setElbow(limbs.elbowR, 0.45);
     limbs.head.rotation.x = -0.15;
+    return;
+  }
+  if (pose === "stand") {
+    limbs.legL.rotation.x = 0.02;
+    limbs.legR.rotation.x = 0.02;
+    setKnee(limbs.kneeL, 0.04);
+    setKnee(limbs.kneeR, 0.04);
+    limbs.armL.rotation.set(0.08, 0, 0.05);
+    limbs.armR.rotation.set(0.08, 0, -0.05);
+    setElbow(limbs.elbowL, 0.08);
+    setElbow(limbs.elbowR, 0.08);
+    limbs.head.rotation.x = 0;
+    if (group.userData.dog) group.userData.dog.position.y = 0;
     return;
   }
   if (pose === "fallen") {
@@ -816,6 +849,7 @@ export function createProps(THREE, materials) {
     const roof = gable(width + 0.7, roofH, depth + 0.55, roofMat);
     roof.position.y = height;
     const doorX = (rand() - 0.5) * 0.8;
+    group.userData.doorX = doorX;
     const doorMat = materials.lambert(0x4a3428, { flat: true });
     const door = scaledBox(0.86, 1.7, 0.08, doorMat);
     door.position.set(doorX, 0.9, -depth / 2 - 0.08);
@@ -1002,6 +1036,16 @@ export function createProps(THREE, materials) {
     const back = scaledBox(1.6, 0.42, 0.08, wood());
     back.position.set(0, 0.78, BENCH.backZ);
     group.add(seat, back);
+    // Seat underside is seatY - 0.04. Legs run from the sidewalk (y 0) up to it.
+    const legMat = metal();
+    const legH = BENCH.seatY - 0.04;
+    for (const x of [-0.62, 0.62]) {
+      for (const z of [-0.14, 0.14]) {
+        const leg = scaledBox(0.07, legH, 0.07, legMat);
+        leg.position.set(x, legH / 2, z);
+        group.add(leg);
+      }
+    }
     bakeStatic(group);
     return group;
   }
@@ -1020,6 +1064,81 @@ export function createProps(THREE, materials) {
       post.position.set(-length / 2 + (posts === 1 ? 0 : (index / (posts - 1)) * length), 0.52, 0);
       group.add(post);
     }
+    bakeStatic(group);
+    return group;
+  }
+
+  // House-local yard. Origin matches the house. Local -z is the street.
+  // The front rail sits yardDepth in front of the facade, with a gate on the door.
+  // Side rails run back toward the wall and stop short of it.
+  // Check: doorX 0, yardDepth 4 → front rail z = -depth/2 - 4, and no picket
+  // has |x| < 0.45 on that rail.
+  function createYardFence({ width, depth, doorX = 0, yardDepth }) {
+    const group = new THREE.Group();
+    const material = materials.lambert(0xe6dcc8, { flat: true });
+    const pathMat = materials.lambert(0xc8bea8, { flat: true });
+    const faceZ = -depth / 2;
+    const frontZ = faceZ - yardDepth;
+    const wallZ = faceZ - 0.32;
+    const half = width / 2;
+    const gate = 1.2;
+    const gateL = doorX - gate / 2;
+    const gateR = doorX + gate / 2;
+    const runs = [];
+
+    const placeOn = (mesh, axis, along, y, fixed) => {
+      if (axis === "x") mesh.position.set(along, y, fixed);
+      else mesh.position.set(fixed, y, along);
+      group.add(mesh);
+    };
+
+    const addSpan = (axis, from, to, fixed, pickets) => {
+      const length = to - from;
+      if (length < 0.3) return;
+      const mid = (from + to) / 2;
+      if (axis === "x") runs.push({ axis, x0: from, x1: to, z: fixed });
+      else runs.push({ axis, x: fixed, z0: from, z1: to });
+      for (const y of [0.4, 0.78]) {
+        const rail = scaledBox(axis === "x" ? length : 0.055, 0.055, axis === "x" ? 0.055 : length, material);
+        placeOn(rail, axis, mid, y, fixed);
+      }
+      const posts = Math.max(2, Math.round(length / 1.45));
+      for (let index = 0; index < posts; index += 1) {
+        const t = posts === 1 ? 0.5 : index / (posts - 1);
+        const post = scaledBox(0.08, 1.0, 0.08, material);
+        placeOn(post, axis, from + t * length, 0.5, fixed);
+      }
+      if (!pickets) return;
+      const count = Math.max(2, Math.floor(length / 0.22));
+      const inset = 0.06;
+      const span = Math.max(0.05, length - inset * 2);
+      for (let index = 0; index < count; index += 1) {
+        const t = count === 1 ? 0.5 : index / (count - 1);
+        const picket = scaledBox(0.04, 0.88, 0.025, material);
+        // Street side of the front rail is -z, so the pickets face the road.
+        placeOn(picket, axis, from + inset + t * span, 0.44, fixed - 0.04);
+      }
+    };
+
+    addSpan("x", -half, gateL, frontZ, true);
+    addSpan("x", gateR, half, frontZ, true);
+    addSpan("z", frontZ, wallZ, -half, false);
+    addSpan("z", frontZ, wallZ, half, false);
+    for (const x of [gateL, gateR]) {
+      const post = scaledBox(0.09, 1.05, 0.09, material);
+      post.position.set(x, 0.52, frontZ);
+      group.add(post);
+    }
+
+    const pathFar = faceZ - 0.62;
+    const pathLen = pathFar - frontZ;
+    if (pathLen > 0.35) {
+      const path = scaledBox(0.92, 0.04, pathLen, pathMat);
+      path.position.set(doorX, 0.025, frontZ + pathLen / 2);
+      group.add(path);
+    }
+
+    group.userData.yard = { faceZ, frontZ, wallZ, gateL, gateR, half, runs };
     bakeStatic(group);
     return group;
   }
@@ -1407,6 +1526,7 @@ export function createProps(THREE, materials) {
     createShop,
     createBench,
     createFence,
+    createYardFence,
     createHydrant,
     createCone: createConeProp,
     createCrate,

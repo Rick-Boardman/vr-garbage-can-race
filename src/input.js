@@ -45,7 +45,7 @@ export function inputFromKeys({ keys, autoWalk = false, lookSteer = null }) {
   };
 }
 
-// Positive pitch is look-up in Halo (drag up increases pitch).
+// Positive pitch is look-up in Halo (a mouse drag up increases pitch).
 // Positive yaw offset is look-left (yaw 0 faces -z, positive yaw turns toward -x).
 export function inputFromLook(yawOffset, pitch) {
   return {
@@ -82,6 +82,20 @@ export function inputFromTilt({ steerDeg, leanDeg, neutralSteer = 0, neutralLean
   return {
     steer: deadzone(clamp((steerDeg - neutralSteer) / 24, -1, 1), 0.07),
     throttle: deadzone(clamp((leanDeg - neutralLean) / 22, -1, 1), 0.07),
+  };
+}
+
+// On foot, a held touch drag is a walk stick. Yaw already turned the body,
+// so this does not also steer. Touch drag up lowers pitch (Halo's touch
+// sign is the opposite of the mouse). That negative pitch is forward.
+// Check: ejected, dragging, touch, pitch -0.38 → throttle 1, steer 0.
+// A mouse drag returns null so desktop look does not walk backward.
+export function footDragStick({ ejected, dragging, touch, pitch }) {
+  if (!ejected || !dragging || !touch) return null;
+  return {
+    steer: 0,
+    throttle: inputFromLook(0, pitch || 0).throttle,
+    strafe: 0,
   };
 }
 
