@@ -52,6 +52,18 @@ export function stepFlop(flop, dt, settled = false) {
   return flop;
 }
 
+// Knee bend is a negative rotation.x: the shin folds toward +z, behind the face.
+// Positive rotation.x still swings a hip or shoulder toward -z, the face.
+function setKnee(knee, bend) {
+  if (!knee) return;
+  knee.rotation.x = -Math.max(0, bend);
+}
+
+function setElbow(elbow, bend) {
+  if (!elbow) return;
+  elbow.rotation.x = Math.max(0, bend);
+}
+
 export function animatePerson(group, time) {
   const limbs = group.userData.limbs;
   if (!limbs) return;
@@ -64,75 +76,111 @@ export function animatePerson(group, time) {
     limbs.armL.rotation.set(flop.armL.a, 0, flop.armLz.a);
     limbs.armR.rotation.set(flop.armR.a, 0, flop.armRz.a);
     limbs.head.rotation.x = flop.head.a;
+    setKnee(limbs.kneeL, 0.55 + Math.abs(flop.legL.a) * 0.45);
+    setKnee(limbs.kneeR, 0.55 + Math.abs(flop.legR.a) * 0.45);
+    setElbow(limbs.elbowL, 0.35);
+    setElbow(limbs.elbowR, 0.35);
     return;
   }
   if (pose === "sit") {
     limbs.legL.rotation.x = 1.25;
     limbs.legR.rotation.x = 1.25;
-    limbs.armL.rotation.set(0, -0.2, 0.15);
-    limbs.armR.rotation.set(0, 0.2, -0.15);
-    limbs.head.rotation.x = 0;
+    setKnee(limbs.kneeL, 1.4);
+    setKnee(limbs.kneeR, 1.4);
+    limbs.armL.rotation.set(0.2, -0.15, 0.18);
+    limbs.armR.rotation.set(0.2, 0.15, -0.18);
+    setElbow(limbs.elbowL, 0.85);
+    setElbow(limbs.elbowR, 0.85);
+    limbs.head.rotation.x = 0.08;
     return;
   }
   if (pose === "talk") {
-    limbs.legL.rotation.x = 0;
-    limbs.legR.rotation.x = 0;
-    limbs.armL.rotation.set(-0.2, 0, 0.15);
-    limbs.armR.rotation.set(-0.45 + Math.sin(time * 3.1 + phase) * 0.35, 0, -0.2);
+    limbs.legL.rotation.x = 0.04;
+    limbs.legR.rotation.x = 0.04;
+    setKnee(limbs.kneeL, 0.08);
+    setKnee(limbs.kneeR, 0.08);
+    limbs.armL.rotation.set(-0.15, 0, 0.12);
+    limbs.armR.rotation.set(-0.35 + Math.sin(time * 3.1 + phase) * 0.3, 0, -0.16);
+    setElbow(limbs.elbowL, 0.25);
+    setElbow(limbs.elbowR, 0.55);
     limbs.head.rotation.x = 0;
     return;
   }
   if (pose === "phone") {
-    limbs.legL.rotation.x = 0;
-    limbs.legR.rotation.x = 0;
-    limbs.armL.rotation.set(-0.15, 0, 0.1);
-    limbs.armR.rotation.set(-1.15, 0, -0.25);
-    limbs.head.rotation.x = 0.4;
+    limbs.legL.rotation.x = 0.04;
+    limbs.legR.rotation.x = 0.04;
+    setKnee(limbs.kneeL, 0.08);
+    setKnee(limbs.kneeR, 0.08);
+    limbs.armL.rotation.set(-0.1, 0, 0.1);
+    limbs.armR.rotation.set(-1.05, 0, -0.2);
+    setElbow(limbs.elbowL, 0.2);
+    setElbow(limbs.elbowR, 1.15);
+    limbs.head.rotation.x = 0.28;
     return;
   }
   if (pose === "ride") {
     // Standing. Hands reach toward -z, the face, and rest on the rim.
     limbs.legL.rotation.x = 0.06;
     limbs.legR.rotation.x = 0.06;
+    setKnee(limbs.kneeL, 0.12);
+    setKnee(limbs.kneeR, 0.12);
     limbs.armL.rotation.set(0.72, 0, 0.18);
     limbs.armR.rotation.set(0.72, 0, -0.18);
+    setElbow(limbs.elbowL, 0);
+    setElbow(limbs.elbowR, 0);
     limbs.head.rotation.x = 0.06;
     return;
   }
   if (pose === "tumble") {
-    limbs.legL.rotation.x = 0.35;
+    limbs.legL.rotation.x = 0.45;
     limbs.legR.rotation.x = -0.2;
-    limbs.armL.rotation.set(-0.9, 0, 0.45);
-    limbs.armR.rotation.set(-0.55, 0, -0.7);
+    setKnee(limbs.kneeL, 0.95);
+    setKnee(limbs.kneeR, 0.7);
+    limbs.armL.rotation.set(-0.7, 0, 0.4);
+    limbs.armR.rotation.set(-0.4, 0, -0.55);
+    setElbow(limbs.elbowL, 0.6);
+    setElbow(limbs.elbowR, 0.45);
     limbs.head.rotation.x = -0.15;
     return;
   }
   if (pose === "fallen") {
-    limbs.legL.rotation.x = 0.15;
-    limbs.legR.rotation.x = -0.2;
-    limbs.armL.rotation.set(0.35, 0, 0.7);
-    limbs.armR.rotation.set(-0.15, 0, -0.9);
-    limbs.head.rotation.x = 0.35;
+    limbs.legL.rotation.x = 0.35;
+    limbs.legR.rotation.x = -0.15;
+    setKnee(limbs.kneeL, 1.15);
+    setKnee(limbs.kneeR, 0.8);
+    limbs.armL.rotation.set(0.25, 0, 0.55);
+    limbs.armR.rotation.set(-0.1, 0, -0.7);
+    setElbow(limbs.elbowL, 0.7);
+    setElbow(limbs.elbowR, 0.55);
+    limbs.head.rotation.x = 0.3;
     return;
   }
   const swing = Math.sin(time * 7.4 + phase);
-  limbs.legL.rotation.x = swing * 0.7;
-  limbs.legR.rotation.x = -swing * 0.7;
-  limbs.armL.rotation.set(-swing * 0.45, 0, 0.08);
-  limbs.armR.rotation.set(swing * 0.45, 0, -0.08);
-  limbs.head.rotation.x = 0;
+  // The forward leg bends. The back leg stays nearly straight so the foot reaches the road.
+  limbs.legL.rotation.x = swing * 0.32;
+  limbs.legR.rotation.x = -swing * 0.32;
+  setKnee(limbs.kneeL, 0.06 + Math.max(0, swing) * 1.15);
+  setKnee(limbs.kneeR, 0.06 + Math.max(0, -swing) * 1.15);
+  limbs.armL.rotation.set(-swing * 0.48, 0, 0.08);
+  limbs.armR.rotation.set(swing * 0.48, 0, -0.08);
+  setElbow(limbs.elbowL, 0.32 + Math.max(0, -swing) * 0.28);
+  setElbow(limbs.elbowR, 0.32 + Math.max(0, swing) * 0.28);
+  limbs.head.rotation.x = swing * 0.04;
+  group.position.y += Math.abs(swing) * 0.02;
   if (group.userData.dog) group.userData.dog.position.y = Math.abs(swing) * 0.05;
 }
 
 export function createProps(THREE, materials) {
   const box = new THREE.BoxGeometry(1, 1, 1);
   const foliage = new THREE.IcosahedronGeometry(1, 0);
-  const trunk = new THREE.CylinderGeometry(0.11, 0.16, 1, 5);
+  const headGeo = new THREE.IcosahedronGeometry(1, 1);
+  const chunky = new THREE.SphereGeometry(1, 5, 4);
+  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 1, 6);
   const wheel = new THREE.CylinderGeometry(0.32, 0.32, 0.24, 8);
   const sphere = new THREE.SphereGeometry(1, 8, 6);
   const cone = new THREE.ConeGeometry(1, 1, 7);
   const shadowGeo = new THREE.CircleGeometry(1, 12);
-  for (const geometry of [box, foliage, trunk, wheel, sphere, cone, shadowGeo]) {
+  for (const geometry of [box, foliage, headGeo, chunky, trunk, wheel, sphere, cone, shadowGeo]) {
     geometry.userData.shared = true;
   }
 
@@ -170,55 +218,107 @@ export function createProps(THREE, materials) {
     const pants = materials.lambert(pick(PANTS, rand), { flat: true });
     const hairMat = materials.lambert(pick(HAIR, rand), { flat: true });
     const shoes = materials.lambert(0x241c18, { flat: true });
+    const eyeMat = materials.lambert(0x1c140f, { flat: true });
     const group = new THREE.Group();
-    const torso = scaledBox(0.38, 0.48, 0.22, shirt);
-    torso.position.y = 1.16;
-    group.add(torso);
+    const hips = scaledBox(0.36, 0.24, 0.2, pants);
+    hips.position.y = 0.98;
+    const chest = scaledBox(0.36, 0.36, 0.22, shirt);
+    chest.position.y = 1.24;
+    const collar = scaledBox(0.18, 0.08, 0.14, shirt);
+    collar.position.set(0, 1.48, -0.02);
+    group.add(hips, chest, collar);
 
     const headPivot = new THREE.Group();
-    headPivot.position.y = 1.48;
-    const head = new THREE.Mesh(sphere, skin);
-    head.scale.set(0.135, 0.15, 0.14);
+    headPivot.position.y = 1.58;
+    const head = new THREE.Mesh(headGeo, skin);
+    head.name = "person-head";
+    head.scale.set(0.15, 0.17, 0.145);
     headPivot.add(head);
-    const hairCap = new THREE.Mesh(sphere, hairMat);
-    hairCap.scale.set(0.145, 0.09, 0.15);
-    hairCap.position.y = 0.07;
-    headPivot.add(hairCap);
-    const eyeMat = materials.lambert(0x1a1a1a, { flat: true });
-    for (const x of [-0.045, 0.045]) {
-      const eye = new THREE.Mesh(sphere, eyeMat);
-      eye.scale.set(0.026, 0.03, 0.02);
-      eye.position.set(x, 0.02, -0.12);
-      headPivot.add(eye);
+    const hairCap = new THREE.Mesh(foliage, hairMat);
+    hairCap.scale.set(0.17, 0.13, 0.17);
+    hairCap.position.set(0, 0.1, 0.03);
+    const fringe = new THREE.Mesh(foliage, hairMat);
+    fringe.scale.set(0.13, 0.055, 0.08);
+    fringe.position.set(0, 0.05, -0.11);
+    headPivot.add(hairCap, fringe);
+    const nose = new THREE.Mesh(cone, skin);
+    nose.scale.set(0.042, 0.08, 0.042);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, -0.01, -0.145);
+    const mouth = scaledBox(0.06, 0.015, 0.02, eyeMat);
+    mouth.position.set(0, -0.055, -0.13);
+    headPivot.add(nose, mouth);
+    for (const x of [-0.05, 0.05]) {
+      const eye = scaledBox(0.03, 0.028, 0.02, eyeMat);
+      eye.position.set(x, 0.02, -0.125);
+      const brow = scaledBox(0.04, 0.012, 0.02, hairMat);
+      brow.position.set(x, 0.055, -0.12);
+      const ear = scaledBox(0.025, 0.05, 0.03, skin);
+      ear.position.set(x * 2.35, 0, 0.02);
+      headPivot.add(eye, brow, ear);
     }
     group.add(headPivot);
 
-    function limb(x, y, material, length, shoe) {
-      const pivot = new THREE.Group();
-      pivot.position.set(x, y, 0);
-      const mesh = scaledBox(0.11, length, 0.11, material);
-      mesh.position.y = -length / 2;
-      pivot.add(mesh);
-      if (shoe) {
-        const foot = scaledBox(0.12, 0.07, 0.22, shoes);
-        foot.position.set(0, -length + 0.02, -0.04);
-        pivot.add(foot);
-      }
-      return pivot;
+    const hipY = 0.9;
+    const thighLen = 0.4;
+    const shinLen = 0.38;
+    function leg(x) {
+      const hip = new THREE.Group();
+      hip.position.set(x, hipY, 0);
+      const thigh = scaledBox(0.13, thighLen, 0.13, pants);
+      thigh.position.y = -thighLen / 2;
+      const knee = new THREE.Group();
+      knee.position.y = -thighLen;
+      const shin = scaledBox(0.1, shinLen, 0.11, pants);
+      shin.position.y = -shinLen / 2;
+      const foot = scaledBox(0.13, 0.07, 0.24, shoes);
+      foot.position.set(0, -shinLen + 0.02, -0.05);
+      knee.add(shin, foot);
+      hip.add(thigh, knee);
+      return { hip, knee, foot };
     }
 
-    const legL = limb(-0.1, 0.9, pants, 0.8, true);
-    const legR = limb(0.1, 0.9, pants, 0.8, true);
-    const armL = limb(-0.26, 1.28, shirt, 0.46, false);
-    const armR = limb(0.26, 1.28, shirt, 0.46, false);
-    for (const arm of [armL, armR]) {
-      const hand = new THREE.Mesh(sphere, skin);
-      hand.scale.set(0.045, 0.045, 0.045);
-      hand.position.y = -0.48;
-      arm.add(hand);
+    function arm(x) {
+      const shoulder = new THREE.Group();
+      shoulder.position.set(x, 1.36, 0);
+      const upper = scaledBox(0.1, 0.24, 0.1, shirt);
+      upper.position.y = -0.12;
+      const elbow = new THREE.Group();
+      elbow.position.y = -0.24;
+      const forearm = scaledBox(0.08, 0.22, 0.08, skin);
+      forearm.position.y = -0.11;
+      const hand = new THREE.Group();
+      hand.position.y = -0.24;
+      const palm = scaledBox(0.09, 0.1, 0.045, skin);
+      const thumb = scaledBox(0.035, 0.055, 0.035, skin);
+      thumb.position.set(x > 0 ? -0.05 : 0.05, 0.02, -0.02);
+      thumb.rotation.z = x > 0 ? 0.7 : -0.7;
+      hand.add(palm, thumb);
+      elbow.add(forearm, hand);
+      shoulder.add(upper, elbow);
+      return { shoulder, elbow, hand };
     }
-    group.add(legL, legR, armL, armR);
-    group.userData.limbs = { legL, legR, armL, armR, head: headPivot };
+
+    const leftLeg = leg(-0.1);
+    const rightLeg = leg(0.1);
+    const leftArm = arm(-0.24);
+    const rightArm = arm(0.24);
+    group.add(leftLeg.hip, rightLeg.hip, leftArm.shoulder, rightArm.shoulder);
+    group.userData.limbs = {
+      legL: leftLeg.hip,
+      legR: rightLeg.hip,
+      kneeL: leftLeg.knee,
+      kneeR: rightLeg.knee,
+      footL: leftLeg.foot,
+      footR: rightLeg.foot,
+      armL: leftArm.shoulder,
+      armR: rightArm.shoulder,
+      elbowL: leftArm.elbow,
+      elbowR: rightArm.elbow,
+      handL: leftArm.hand,
+      handR: rightArm.hand,
+      head: headPivot,
+    };
     group.userData.pose = pose;
     group.userData.phase = rand() * Math.PI * 2;
     return group;
@@ -226,23 +326,27 @@ export function createProps(THREE, materials) {
 
   function createTree(rand) {
     const group = new THREE.Group();
-    const height = 1.3 + rand() * 1.5;
-    const trunkMesh = new THREE.Mesh(trunk, materials.lambert(0x6b4a32, { flat: true }));
-    trunkMesh.scale.set(1, height, 1);
+    const height = 1.55 + rand() * 1.55;
+    const bark = materials.lambert(rand() > 0.5 ? 0x6b442c : 0x7a5236, { flat: true });
+    const trunkMesh = new THREE.Mesh(trunk, bark);
+    trunkMesh.scale.set(1.15, height, 1.15);
     trunkMesh.position.y = height / 2;
     group.add(trunkMesh);
-    const leaf = materials.lambert(rand() > 0.5 ? 0x3e9a45 : 0x2f7a34, { flat: true });
-    const scale = 0.55 + rand() * 0.28;
-    const blob = new THREE.Mesh(foliage, leaf);
-    blob.scale.set(scale * 1.15, scale * 0.8, scale);
-    blob.position.y = height + scale * 0.35;
-    blob.rotation.y = rand() * Math.PI;
-    group.add(blob);
-    if (rand() > 0.4) {
-      const extra = new THREE.Mesh(foliage, leaf);
-      extra.scale.set(scale * 0.7, scale * 0.55, scale * 0.7);
-      extra.position.set((rand() - 0.5) * 0.4, height + scale * 0.85, (rand() - 0.5) * 0.3);
-      group.add(extra);
+    const greens = [0x8fce55, 0x3c9a38, 0x6bb84a];
+    const crown = 0.72 + rand() * 0.28;
+    const puffs = [
+      [0, height + crown * 0.42, 0, crown, 0.78, 0],
+      [-crown * 0.55, height + crown * 0.12, crown * 0.12, crown * 0.7, 0.68, 1],
+      [crown * 0.5, height + crown * 0.18, -crown * 0.12, crown * 0.66, 0.72, 2],
+      [0.05, height + crown * 0.92, 0.02, crown * 0.5, 0.62, 0],
+    ];
+    for (const [x, y, z, scale, squash, tint] of puffs) {
+      const leaf = materials.lambert(greens[tint], { flat: true });
+      const blob = new THREE.Mesh(foliage, leaf);
+      blob.scale.set(scale, scale * squash, scale * 0.92);
+      blob.position.set(x, y, z);
+      blob.rotation.y = rand() * Math.PI;
+      group.add(blob);
     }
     return group;
   }
@@ -270,7 +374,11 @@ export function createProps(THREE, materials) {
       const mesh = new THREE.Mesh(wheel, tire);
       mesh.rotation.z = Math.PI / 2;
       mesh.scale.set(scale, scale, scale);
-      pivot.add(mesh);
+      const hub = new THREE.Mesh(wheel, materials.standard(0xd5dbe2, { flat: true, roughness: 0.3, metalness: 0.72 }));
+      hub.rotation.z = Math.PI / 2;
+      hub.scale.set(scale * 0.38, scale * 0.38, scale * 0.22);
+      hub.position.x = Math.sign(x || 1) * 0.13 * scale;
+      pivot.add(mesh, hub);
       group.add(pivot);
       wheels.push(pivot);
     }
@@ -295,11 +403,65 @@ export function createProps(THREE, materials) {
         ? 0xf0c431
         : pick([0x2f6adf, 0xd23b3b, 0xf4f4f4, 0x2aabb0, 0xf08a2a, 0x3a3a3a, 0x6a4ad4], rand);
     const group = new THREE.Group();
-    const body = scaledBox(1.75, 0.58, 4.2, materials.standard(paint, { flat: true, roughness: 0.42, metalness: 0.18 }));
-    body.position.y = 0.64;
-    const cabin = scaledBox(1.55, 0.5, 1.85, glass());
-    cabin.position.set(0, 1.12, 0.28);
-    group.add(body, cabin);
+    const bodyMat = materials.standard(paint, { flat: true, roughness: 0.42, metalness: 0.18 });
+    const body = scaledBox(1.75, 0.46, 4.15, bodyMat);
+    body.position.y = 0.56;
+    const cabin = scaledBox(1.52, 0.42, 1.5, bodyMat);
+    cabin.position.set(0, 0.98, 0.22);
+    const roof = scaledBox(1.28, 0.08, 1.15, bodyMat);
+    roof.position.set(0, 1.22, 0.28);
+    const shield = glass();
+    const wind = scaledBox(1.28, 0.4, 0.05, shield);
+    wind.position.set(0, 1.02, -0.55);
+    wind.rotation.x = 0.5;
+    const rearGlass = scaledBox(1.18, 0.34, 0.05, shield);
+    rearGlass.position.set(0, 1.02, 1.0);
+    rearGlass.rotation.x = -0.42;
+    group.add(body, cabin, roof, wind, rearGlass);
+    // Side glass sits proud of the cabin so a passing car reads as windows, not a slab.
+    const pane = materials.lambert(0x3e6274, { flat: true });
+    const seam = materials.lambert(0x1a1e22, { flat: true });
+    const chrome = materials.standard(0xc5ccd1, { flat: true, roughness: 0.35, metalness: 0.55 });
+    for (const x of [-0.8, 0.8]) {
+      for (const z of [-0.22, 0.55]) {
+        const side = scaledBox(0.06, 0.36, 0.48, pane);
+        side.position.set(x, 1.05, z);
+        group.add(side);
+      }
+      const mullion = scaledBox(0.07, 0.42, 0.06, seam);
+      mullion.position.set(x, 1.05, 0.16);
+      const mirror = scaledBox(0.2, 0.07, 0.12, seam);
+      mirror.position.set(x * 1.28, 1.02, -0.4);
+      group.add(mullion, mirror);
+    }
+    for (const x of [-0.9, 0.9]) {
+      const belt = scaledBox(0.04, 0.05, 3.9, seam);
+      belt.position.set(x, 0.74, 0.05);
+      const frontCut = scaledBox(0.05, 0.48, 0.06, seam);
+      frontCut.position.set(x, 0.52, -0.58);
+      const rearCut = scaledBox(0.05, 0.48, 0.06, seam);
+      rearCut.position.set(x, 0.52, 0.92);
+      group.add(belt, frontCut, rearCut);
+    }
+    for (const z of [-1.28, 1.28]) {
+      for (const x of [-0.92, 0.92]) {
+        const lip = scaledBox(0.1, 0.16, 0.74, bodyMat);
+        lip.position.set(x, 0.72, z);
+        group.add(lip);
+      }
+    }
+    const grille = scaledBox(0.92, 0.22, 0.06, seam);
+    grille.position.set(0, 0.52, -2.1);
+    const bumper = scaledBox(1.82, 0.14, 0.12, chrome);
+    bumper.position.set(0, 0.34, -2.12);
+    const rearBumper = scaledBox(1.72, 0.14, 0.12, chrome);
+    rearBumper.position.set(0, 0.34, 2.12);
+    group.add(grille, bumper, rearBumper);
+    for (const y of [0.46, 0.52, 0.58]) {
+      const slat = scaledBox(0.76, 0.03, 0.03, chrome);
+      slat.position.set(0, y, -2.16);
+      group.add(slat);
+    }
     if (style === "stripe" || cop) {
       const stripe = scaledBox(cop ? 0.18 : 0.32, 0.05, 4.25, materials.lambert(0xf7f7f7, { flat: true }));
       stripe.position.y = 0.95;
@@ -308,7 +470,9 @@ export function createProps(THREE, materials) {
     if (style === "taxi") {
       const sign = scaledBox(0.46, 0.14, 0.7, materials.lambert(0x1b1b1b, { flat: true }));
       sign.position.set(0, 1.45, 0.25);
-      group.add(sign);
+      const lamp = scaledBox(0.5, 0.05, 0.74, materials.lambert(0xffd36a, { flat: true, emissive: 0xc48a20 }));
+      lamp.position.set(0, 1.36, 0.25);
+      group.add(sign, lamp);
     }
     if (cop) {
       const bar = scaledBox(0.92, 0.1, 0.36, materials.lambert(0x141414, { flat: true }));
@@ -394,7 +558,13 @@ export function createProps(THREE, materials) {
     for (const x of [-0.44, 0.44]) {
       const wind = scaledBox(0.78, 0.48, 0.06, shield);
       wind.position.set(x, 1.42, -1.98);
+      wind.rotation.x = 0.28;
       group.add(wind);
+    }
+    for (const [x, z] of [[-1.02, -2.15], [1.02, -2.15], [-1.02, 1.7], [1.02, 1.7]]) {
+      const fender = scaledBox(0.38, 0.16, 0.72, bodyMat);
+      fender.position.set(x, 0.78, z);
+      group.add(fender);
     }
     for (const x of [-1.02, 1.02]) {
       const win = scaledBox(0.06, 0.4, 0.62, shield);
@@ -415,6 +585,39 @@ export function createProps(THREE, materials) {
       rail.name = "truck-rail";
       rail.position.set(x * 0.96, 0.98, 1.25);
       group.add(rail);
+    }
+    for (const x of [-1.04, 1.04]) {
+      const door = scaledBox(0.06, 0.58, 0.68, dark);
+      door.position.set(x, 0.98, -1.22);
+      const handle = scaledBox(0.06, 0.05, 0.12, chrome);
+      handle.position.set(Math.sign(x) * 1.1, 1.02, -1.48);
+      const step = scaledBox(0.18, 0.06, 0.34, dark);
+      step.position.set(Math.sign(x) * 1.08, 0.52, -1.32);
+      group.add(door, handle, step);
+    }
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.85, 8), chrome);
+    tank.rotation.x = Math.PI / 2;
+    tank.position.set(0.78, 0.5, 0.35);
+    group.add(tank);
+    for (const x of [-1.02, 1.02]) {
+      const flap = scaledBox(0.08, 0.32, 0.26, dark);
+      flap.position.set(x, 0.28, 2.12);
+      group.add(flap);
+    }
+    for (const x of [-0.7, 0, 0.7]) {
+      const marker = scaledBox(0.12, 0.08, 0.08, materials.lambert(0xffb03a, { flat: true, emissive: 0xff8a1a }));
+      marker.position.set(x, 1.76, -1.82);
+      group.add(marker);
+    }
+    for (const z of [0.45, 1.25, 2.05]) {
+      const rib = scaledBox(1.7, 0.06, 0.08, dark);
+      rib.position.set(0, 0.8, z);
+      group.add(rib);
+    }
+    for (const y of [0.64, 0.76, 0.88, 1.0]) {
+      const bar = scaledBox(1.15, 0.03, 0.03, chrome);
+      bar.position.set(0, y, -3.14);
+      group.add(bar);
     }
     if (bigStack) addOverCabStack(group, chrome, dark);
     else addMuffler(group, { x: -0.62, y: 0.4, z: 2.05, length: 0.62, smoke: rand() < 0.15 });
@@ -437,27 +640,58 @@ export function createProps(THREE, materials) {
   function createBus(rand) {
     const paint = pick([0xf0c431, 0x2f6adf, 0xd23b3b, 0x1f8a4c], rand);
     const group = new THREE.Group();
-    const body = scaledBox(2.35, 1.85, 9.5, materials.standard(paint, { flat: true, roughness: 0.5, metalness: 0.08 }));
+    const bodyMat = materials.standard(paint, { flat: true, roughness: 0.5, metalness: 0.08 });
+    const body = scaledBox(2.35, 1.85, 9.5, bodyMat);
     body.position.set(0, 1.48, 0.15);
+    const frameMat = materials.lambert(0x1a1e22, { flat: true });
     const door = scaledBox(0.08, 1.4, 1.05, materials.lambert(0xdfe6ee, { flat: true }));
     door.position.set(-1.2, 1.15, -3.35);
+    const doorFrame = scaledBox(0.05, 1.55, 1.2, frameMat);
+    doorFrame.position.set(-1.26, 1.15, -3.35);
+    const doorGlass = scaledBox(0.04, 0.48, 0.38, materials.lambert(0xb7d7e8, { flat: true }));
+    doorGlass.position.set(-1.28, 1.42, -3.35);
     const sign = scaledBox(1.4, 0.28, 0.08, materials.lambert(0x1b1b1b, { flat: true }));
     sign.position.set(0, 2.58, -4.86);
-    group.add(body, door, sign);
+    const dest = scaledBox(1.12, 0.14, 0.03, materials.lambert(0xf3e2a0, { flat: true, emissive: 0x6a5a30 }));
+    dest.position.set(0, 2.58, -4.92);
+    group.add(body, door, doorFrame, doorGlass, sign, dest);
     const pane = materials.lambert(0xb7d7e8, { flat: true, opacity: 0.88 });
     for (const x of [-1.22, 1.22]) {
       for (const z of [-1.55, 0.15, 1.75, 3.35]) {
+        const bezel = scaledBox(0.04, 0.74, 1.42, frameMat);
+        bezel.position.set(Math.sign(x) * 1.18, 2.05, z);
         const win = scaledBox(0.08, 0.62, 1.28, pane);
         win.position.set(x, 2.05, z);
-        group.add(win);
+        group.add(bezel, win);
       }
     }
     // Body front sits at z=-4.6. The glass has to stand proud of that face
     // or the red panel reads as a blank rear.
-    const frameMat = materials.lambert(0x1a1e22, { flat: true });
     const bezel = scaledBox(2.16, 0.96, 0.08, frameMat);
     bezel.position.set(0, 1.96, -4.78);
     group.add(bezel);
+    const stripe = scaledBox(2.42, 0.14, 8.4, materials.lambert(0xf4f1ea, { flat: true }));
+    stripe.position.set(0, 1.2, 0.2);
+    const bumper = scaledBox(2.25, 0.16, 0.14, materials.standard(0xc5ccd1, { flat: true, roughness: 0.35, metalness: 0.5 }));
+    bumper.position.set(0, 0.4, -4.95);
+    const roofRidge = scaledBox(1.55, 0.12, 6.4, materials.lambert(0x2a3138, { flat: true }));
+    roofRidge.position.set(0, 2.48, 0.25);
+    group.add(stripe, bumper, roofRidge);
+    for (const z of [-2.6, -0.8, 1.0, 2.8]) {
+      const lamp = scaledBox(0.1, 0.08, 0.1, materials.lambert(0xffb03a, { flat: true, emissive: 0xff8a1a }));
+      lamp.position.set(0, 2.62, z);
+      group.add(lamp);
+    }
+    for (const [x, z] of [[-1.22, -3.15], [1.22, -3.15], [-1.22, 3.15], [1.22, 3.15]]) {
+      const arch = scaledBox(0.1, 0.18, 0.85, bodyMat);
+      arch.position.set(x, 0.72, z);
+      group.add(arch);
+    }
+    for (const y of [0.9, 1.2, 1.5]) {
+      const vent = scaledBox(1.35, 0.08, 0.05, frameMat);
+      vent.position.set(0, y, 4.96);
+      group.add(vent);
+    }
     const shield = materials.lambert(0x7ec8e8, { flat: true, opacity: 0.94, emissive: 0x163848 });
     for (const x of [-0.52, 0.52]) {
       const windshield = scaledBox(0.92, 0.78, 0.1, shield);
@@ -495,51 +729,190 @@ export function createProps(THREE, materials) {
     const width = 6.4 + rand() * 2.4;
     const depth = 7.2 + rand() * 2.2;
     const height = 2.7 + rand() * 0.9;
-    const body = scaledBox(width, height, depth, materials.lambert(pick(SIDING, rand), { flat: true }));
+    const siding = materials.lambert(pick(SIDING, rand), { flat: true });
+    const trim = materials.lambert(0x3c342c, { flat: true });
+    const body = scaledBox(width, height, depth, siding);
     body.position.y = height / 2;
-    const roof = gable(width + 0.5, 1.45 + rand() * 0.4, depth + 0.4, materials.lambert(pick(ROOFS, rand), { flat: true, side: THREE.DoubleSide }));
+    const foundation = scaledBox(width + 0.12, 0.32, depth + 0.12, materials.lambert(0x6a6358, { flat: true }));
+    foundation.position.y = 0.16;
+    const roofH = 1.55 + rand() * 0.45;
+    const roofMat = materials.lambert(pick(ROOFS, rand), { flat: true, side: THREE.DoubleSide });
+    const roof = gable(width + 0.7, roofH, depth + 0.55, roofMat);
     roof.position.y = height;
-    const door = scaledBox(0.9, 1.7, 0.1, materials.lambert(0x4a3428, { flat: true }));
-    door.position.set((rand() - 0.5) * 0.4, 0.85, -depth / 2 - 0.04);
-    group.add(body, roof, door);
+    const doorX = (rand() - 0.5) * 0.8;
+    const doorMat = materials.lambert(0x4a3428, { flat: true });
+    const door = scaledBox(0.86, 1.7, 0.08, doorMat);
+    door.position.set(doorX, 0.9, -depth / 2 - 0.08);
+    const doorFrame = scaledBox(1.08, 1.92, 0.06, trim);
+    doorFrame.position.set(doorX, 0.98, -depth / 2 - 0.04);
+    const stoop = scaledBox(1.25, 0.12, 0.5, trim);
+    stoop.position.set(doorX, 0.08, -depth / 2 - 0.32);
+    const front = -depth / 2;
+    const porchY = Math.min(height - 0.2, 2.28);
+    const porch = scaledBox(2.35, 0.08, 0.55, trim);
+    porch.position.set(doorX, porchY, front - 0.14);
+    const fascia = scaledBox(width + 0.85, 0.12, 0.16, trim);
+    fascia.position.set(0, height - 0.04, front - 0.3);
+    const ridge = scaledBox(0.16, 0.1, depth + 0.65, materials.lambert(0x2c3036, { flat: true }));
+    ridge.position.y = height + roofH - 0.04;
+    group.add(body, foundation, roof, doorFrame, door, stoop, porch, fascia, ridge);
+    for (const x of [-0.95, 0.95]) {
+      const post = scaledBox(0.1, porchY, 0.1, trim);
+      post.position.set(doorX + x, porchY / 2, front - 0.34);
+      group.add(post);
+    }
+    for (const y of [0.58, 1.18]) {
+      const panel = scaledBox(0.56, 0.46, 0.03, materials.lambert(0x3a2a22, { flat: true }));
+      panel.position.set(doorX, y, front - 0.15);
+      group.add(panel);
+    }
     for (const x of [-width * 0.28, width * 0.28]) {
-      const windowMesh = scaledBox(0.7, 0.85, 0.08, glass());
-      windowMesh.position.set(x, height * 0.62, -depth / 2 - 0.04);
-      group.add(windowMesh);
+      const y = height * 0.62;
+      const z = front - 0.02;
+      const frame = scaledBox(0.96, 1.08, 0.06, trim);
+      frame.position.set(x, y, z);
+      const windowMesh = scaledBox(0.68, 0.78, 0.05, glass());
+      windowMesh.position.set(x, y, z - 0.03);
+      const sill = scaledBox(1.02, 0.08, 0.16, trim);
+      sill.position.set(x, y - 0.52, z - 0.06);
+      const muntinV = scaledBox(0.045, 0.74, 0.03, trim);
+      muntinV.position.set(x, y, z - 0.06);
+      const muntinH = scaledBox(0.64, 0.045, 0.03, trim);
+      muntinH.position.set(x, y, z - 0.06);
+      group.add(frame, windowMesh, sill, muntinV, muntinH);
+      for (const side of [-0.58, 0.58]) {
+        const shutter = scaledBox(0.14, 0.9, 0.04, trim);
+        shutter.position.set(x + side, y, z - 0.02);
+        group.add(shutter);
+      }
+    }
+    for (const outward of [-1, 1]) {
+      for (const z of [-depth * 0.22, depth * 0.2]) {
+        const x = outward * (width / 2 + 0.03);
+        const y = height * 0.58;
+        const frame = scaledBox(0.05, 0.86, 0.7, trim);
+        frame.position.set(x, y, z);
+        const windowMesh = scaledBox(0.04, 0.62, 0.48, glass());
+        windowMesh.position.set(x + outward * 0.03, y, z);
+        const muntinV = scaledBox(0.03, 0.58, 0.04, trim);
+        muntinV.position.set(x + outward * 0.05, y, z);
+        const muntinH = scaledBox(0.03, 0.04, 0.46, trim);
+        muntinH.position.set(x + outward * 0.05, y, z);
+        group.add(frame, windowMesh, muntinV, muntinH);
+      }
+    }
+    for (const x of [-1, 1]) {
+      for (const z of [-1, 1]) {
+        const board = scaledBox(0.12, height, 0.12, trim);
+        board.position.set(x * width / 2, height / 2, z * depth / 2);
+        group.add(board);
+      }
     }
     if (rand() > 0.45) {
       const chimney = scaledBox(0.42, 1.05, 0.42, materials.lambert(0x6d4038, { flat: true }));
-      chimney.position.set(width * 0.22, height + 1.15, depth * 0.12);
-      group.add(chimney);
+      chimney.position.set(width * 0.22, height + roofH * 0.55, depth * 0.12);
+      const cap = scaledBox(0.52, 0.08, 0.52, trim);
+      cap.position.set(width * 0.22, height + roofH * 0.55 + 0.56, depth * 0.12);
+      group.add(chimney, cap);
     }
     group.userData.depth = depth;
     group.userData.width = width;
     return group;
   }
 
-  function createTower(rand, litChance) {
+  function createTower(rand, litChance, street = true) {
     const group = new THREE.Group();
     const width = 8 + rand() * 6;
     const depth = 8 + rand() * 4;
     const height = 7 + rand() * 18;
     const body = scaledBox(width, height, depth, materials.facade(pick(FACADES, rand), litChance, Math.floor(rand() * 20)));
     body.position.y = height / 2;
-    const cap = scaledBox(width + 0.4, 0.55, depth + 0.4, materials.lambert(0x667078, { flat: true }));
-    cap.position.y = height + 0.25;
-    group.add(body, cap);
+    const skirtMat = materials.lambert(0x3e4650, { flat: true });
+    const trim = materials.lambert(0x2e353c, { flat: true });
+    const skirt = scaledBox(width + 0.1, 1.2, depth + 0.1, skirtMat);
+    skirt.position.y = 0.6;
+    const cap = scaledBox(width + 0.55, 0.28, depth + 0.55, materials.lambert(0x667078, { flat: true }));
+    cap.position.y = height + 0.16;
+    const pent = scaledBox(width * 0.4, 1.15, depth * 0.4, materials.lambert(0x4a545c, { flat: true }));
+    pent.position.y = height + 0.95;
+    group.add(body, skirt, cap, pent);
+    for (const x of [-1, 1]) {
+      for (const z of [-1, 1]) {
+        const pier = scaledBox(0.32, height + 0.15, 0.32, trim);
+        pier.position.set(x * width / 2, height / 2, z * depth / 2);
+        group.add(pier);
+      }
+    }
+    const bands = Math.max(2, Math.min(6, Math.floor(height / 3.4)));
+    for (let index = 1; index < bands; index += 1) {
+      const band = scaledBox(width + 0.18, 0.1, depth + 0.18, trim);
+      band.position.y = (height / bands) * index;
+      group.add(band);
+    }
+    const front = -depth / 2;
+    if (street) {
+      const lobby = scaledBox(width * 0.48, 1.55, 0.06, glass());
+      lobby.position.set(-width * 0.1, 1.15, front - 0.06);
+      const lobbyFrame = scaledBox(width * 0.54, 1.75, 0.05, trim);
+      lobbyFrame.position.set(-width * 0.1, 1.15, front - 0.02);
+      const lobbyDoor = scaledBox(0.9, 1.85, 0.08, materials.lambert(0x241c18, { flat: true }));
+      lobbyDoor.position.set(width * 0.26, 0.98, front - 0.08);
+      group.add(lobbyFrame, lobby, lobbyDoor);
+    }
+    const balconyCount = Math.max(1, Math.min(4, Math.floor((height - 4) / 3.2)));
+    for (let index = 0; index < balconyCount; index += 1) {
+      const y = 3.5 + index * 3.15;
+      if (y > height - 1.4) break;
+      const slabW = Math.min(3.4, width * 0.34);
+      const x = width * 0.16;
+      const slab = scaledBox(slabW, 0.1, 0.55, skirtMat);
+      slab.position.set(x, y, front - 0.22);
+      const rail = scaledBox(slabW, 0.08, 0.06, trim);
+      rail.position.set(x, y + 0.42, front - 0.46);
+      group.add(slab, rail);
+      for (const end of [-1, 1]) {
+        const post = scaledBox(0.06, 0.42, 0.06, trim);
+        post.position.set(x + end * (slabW * 0.5 - 0.04), y + 0.24, front - 0.46);
+        const sideRail = scaledBox(0.05, 0.08, 0.5, trim);
+        sideRail.position.set(x + end * (slabW * 0.5 - 0.04), y + 0.42, front - 0.22);
+        group.add(post, sideRail);
+      }
+    }
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 1.05, 8), skirtMat);
+    tank.position.set(width * 0.28, height + 1.75, depth * 0.28);
+    const antenna = scaledBox(0.06, 1.7, 0.06, trim);
+    antenna.position.set(-width * 0.28, height + 1.6, -depth * 0.22);
+    group.add(tank, antenna);
     group.userData.depth = depth;
     group.userData.width = width;
     return group;
   }
 
   function createShop(rand, litChance) {
-    const group = createTower(rand, litChance);
+    const group = createTower(rand, litChance, false);
     const width = group.userData.width;
     const depth = group.userData.depth;
-    const awningMesh = scaledBox(width * 0.86, 0.1, 1.5, materials.awning(pick([0xd23b3b, 0x2f6adf, 0xf0c431, 0x2f9d6a], rand)));
+    const awningColor = pick([0xd23b3b, 0x2f6adf, 0xf0c431, 0x2f9d6a], rand);
+    const awningMesh = scaledBox(width * 0.86, 0.1, 1.5, materials.awning(awningColor));
     awningMesh.position.set(0, 2.7, -depth / 2 - 0.55);
     awningMesh.rotation.x = AWNING_PITCH;
-    group.add(awningMesh);
+    const front = -depth / 2 - 0.06;
+    const trim = materials.lambert(0x2a3138, { flat: true });
+    const storeFrame = scaledBox(width * 0.62, 1.6, 0.05, trim);
+    storeFrame.position.set(-width * 0.12, 1.15, front + 0.04);
+    const store = scaledBox(width * 0.55, 1.35, 0.08, glass());
+    store.position.set(-width * 0.12, 1.15, front);
+    const sill = scaledBox(width * 0.64, 0.1, 0.16, trim);
+    sill.position.set(-width * 0.12, 0.4, front - 0.06);
+    const shopDoor = scaledBox(0.8, 1.7, 0.08, materials.lambert(0x3a2a24, { flat: true }));
+    shopDoor.position.set(width * 0.28, 0.9, front);
+    const doorFrame = scaledBox(1.0, 1.9, 0.05, trim);
+    doorFrame.position.set(width * 0.28, 0.98, front + 0.04);
+    const board = scaledBox(width * 0.32, 0.4, 0.08, materials.lambert(0x1b1b1b, { flat: true }));
+    board.position.set(width * 0.28, 2.15, front - 0.08);
+    const letter = scaledBox(width * 0.24, 0.16, 0.03, materials.lambert(awningColor, { flat: true }));
+    letter.position.set(width * 0.28, 2.15, front - 0.14);
+    group.add(awningMesh, storeFrame, store, sill, doorFrame, shopDoor, board, letter);
     return group;
   }
 
@@ -657,28 +1030,52 @@ export function createProps(THREE, materials) {
 
   function createPothole(rand) {
     const group = new THREE.Group();
-    const asphalt = materials.lambert(0x5c656e, { flat: true });
     const broken = materials.lambert(0x6e675c, { flat: true });
-    const pit = materials.lambert(0x07080a, { flat: true });
-    const dirt = materials.lambert(0x3a2918, { flat: true });
+    const crackMat = materials.lambert(0x1a1c20, { flat: true });
+    const voidMat = materials.lambert(0x070809, { flat: true });
+    const pitMat = materials.lambert(0x120e0c, { flat: true });
+    const dirt = materials.lambert(0x4a301c, { flat: true });
+    const chunkMat = materials.lambert(0x4e555c, { flat: true });
     const jagged = (count, min, span) => {
       const radii = [];
       for (let index = 0; index < count; index += 1) radii.push(min + rand() * span);
       return radii;
     };
-    // A dark mouth on the asphalt. Chunks lie in it. Nothing stands up as a mound.
-    group.add(flatShape(jagged(10, 0.95, 0.4), asphalt, 0.016));
-    group.add(flatShape(jagged(9, 0.58, 0.26), pit, 0.024));
-    group.add(flatShape(jagged(7, 0.14, 0.12), dirt, 0.032));
+    // Same rand count as before, so the rest of the chunk stays put.
+    // The big shape is the dark mouth. No pale ring, no gear of crack bars.
+    const lip = jagged(10, 0.55, 0.7);
+    const pit = jagged(9, 0.42, 0.28);
+    const floor = jagged(7, 0.18, 0.16);
+    const mouth = flatShape(lip, voidMat, 0.012);
+    const depth = flatShape(pit, pitMat, 0.02);
+    depth.position.x = -0.06;
+    depth.position.z = 0.04;
+    const soil = flatShape(floor.map((radius) => radius * 1.55), dirt, 0.028);
+    soil.position.x = 0.1;
+    soil.position.z = -0.06;
+    group.add(mouth, depth, soil);
+    lip.forEach((radius, index) => {
+      if (index % 2 === 0) return;
+      const angle = (index / lip.length) * Math.PI * 2 + index * 0.22;
+      const length = 0.36 + (index % 3) * 0.18;
+      const crack = scaledBox(0.028 + (index % 2) * 0.012, 0.008, length, crackMat);
+      const reach = radius * 0.7 + length * 0.38;
+      crack.position.set(Math.cos(angle) * reach, 0.016, Math.sin(angle) * reach * 0.74);
+      crack.rotation.y = -angle + 0.62;
+      group.add(crack);
+    });
     const chunks = 6 + Math.floor(rand() * 3);
     for (let index = 0; index < chunks; index += 1) {
       const angle = rand() * Math.PI * 2;
-      const reach = 0.16 + rand() * 0.36;
-      const slab = scaledBox(0.2 + rand() * 0.18, 0.03, 0.1 + rand() * 0.08, rand() > 0.5 ? broken : asphalt);
-      slab.position.set(Math.cos(angle) * reach, 0.03, Math.sin(angle) * reach * 0.8);
-      const tilt = 0.16 + rand() * 0.32;
-      slab.rotation.set(rand() > 0.5 ? tilt : -tilt, angle, (rand() - 0.5) * 0.3);
-      group.add(slab);
+      const reach = 0.22 + rand() * 0.72;
+      const slab = scaledBox(0.14 + rand() * 0.2, 0.014, 0.07 + rand() * 0.1, rand() > 0.5 ? chunkMat : broken);
+      slab.position.set(Math.cos(angle) * reach, 0.032, Math.sin(angle) * reach * 0.8);
+      const tilt = 0.22 + rand() * 0.28;
+      slab.rotation.set(rand() > 0.5 ? tilt : -tilt, angle * 1.3, (rand() - 0.5) * 0.35);
+      const chip = scaledBox(0.08, 0.01, 0.05, chunkMat);
+      chip.position.set(Math.cos(angle + 0.8) * reach * 0.45, 0.024, Math.sin(angle + 1.1) * reach * 0.4);
+      chip.rotation.y = angle + 0.9;
+      group.add(slab, chip);
     }
     return group;
   }
@@ -702,67 +1099,106 @@ export function createProps(THREE, materials) {
   function createCow(rand) {
     const group = new THREE.Group();
     const hide = materials.lambert(0xf4f1ea, { flat: true });
-    const dark = materials.lambert(0x2a2420, { flat: true });
+    const dark = materials.lambert(0x241c18, { flat: true });
     const hoofMat = materials.lambert(0x1a1614, { flat: true });
     const pink = materials.lambert(0xf0b0b8, { flat: true });
-    // Cylinder +Y becomes +Z (the rear) after rotateX(π/2). Local -z is the face.
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.32, 1.62, 8), hide);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.82, 0.12);
-    group.add(barrel);
-    const shoulder = new THREE.Mesh(sphere, hide);
-    shoulder.scale.set(0.28, 0.16, 0.22);
-    shoulder.position.set(0, 1.08, -0.42);
-    group.add(shoulder);
+    const nose = materials.lambert(0xe7a090, { flat: true });
+    // Oval barrel. Local −z is the face. Chunky sphere reads rounder than the old prism.
+    const barrel = new THREE.Mesh(chunky, hide);
+    barrel.scale.set(0.38, 0.3, 0.62);
+    barrel.position.set(0, 0.74, 0.06);
+    const chest = new THREE.Mesh(foliage, hide);
+    chest.scale.set(0.32, 0.24, 0.28);
+    chest.position.set(0, 0.78, -0.36);
+    const hump = new THREE.Mesh(foliage, hide);
+    hump.scale.set(0.24, 0.14, 0.26);
+    hump.position.set(0, 1.02, -0.16);
+    const hip = new THREE.Mesh(foliage, hide);
+    hip.scale.set(0.3, 0.18, 0.26);
+    hip.position.set(0, 0.8, 0.46);
+    const belly = new THREE.Mesh(foliage, hide);
+    belly.scale.set(0.34, 0.14, 0.4);
+    belly.position.set(0, 0.5, 0.08);
+    group.add(barrel, chest, hump, hip, belly);
+    // Six rand() calls, same as the old spots, so the herd after this cow stays put.
     for (let index = 0; index < 3; index += 1) {
-      const spot = new THREE.Mesh(sphere, dark);
-      spot.scale.set(0.16, 0.08, 0.18);
-      spot.position.set((rand() - 0.5) * 0.4, 1.05, (rand() - 0.35) * 0.55);
+      const spot = new THREE.Mesh(foliage, dark);
+      const jitter = (rand() - 0.5) * 0.1;
+      const along = (rand() - 0.4) * 0.7;
+      const side = index === 0 ? 1 : -1;
+      spot.scale.set(0.05, 0.1 + index * 0.02, 0.14 + (index === 2 ? 0.06 : 0));
+      spot.position.set(side * 0.32 + jitter * side, 0.82 + (index === 2 ? 0.08 : 0), along);
       group.add(spot);
     }
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 0.46, 6), hide);
-    neck.position.set(0, 1.08, -0.72);
-    neck.rotation.x = -0.85;
-    const head = new THREE.Mesh(sphere, hide);
-    head.scale.set(0.22, 0.2, 0.28);
-    head.position.set(0, 1.12, -0.98);
-    const snout = new THREE.Mesh(sphere, materials.lambert(0xf3c2ae, { flat: true }));
-    snout.scale.set(0.13, 0.09, 0.16);
-    snout.position.set(0, 0.98, -1.16);
-    group.add(neck, head, snout);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 0.38, 6), hide);
+    neck.position.set(0, 0.96, -0.62);
+    neck.rotation.x = -1.05;
+    const dewlap = scaledBox(0.08, 0.11, 0.06, pink);
+    dewlap.position.set(0, 0.84, -0.74);
+    dewlap.rotation.x = -0.45;
+    const head = new THREE.Mesh(chunky, hide);
+    head.scale.set(0.18, 0.16, 0.2);
+    head.position.set(0, 1.08, -0.92);
+    const snout = scaledBox(0.16, 0.09, 0.16, nose);
+    snout.position.set(0, 0.98, -1.08);
+    const nostrilL = scaledBox(0.035, 0.028, 0.02, dark);
+    nostrilL.position.set(-0.04, 0.96, -1.17);
+    const nostrilR = scaledBox(0.035, 0.028, 0.02, dark);
+    nostrilR.position.set(0.04, 0.96, -1.17);
+    group.add(neck, dewlap, head, snout, nostrilL, nostrilR);
     for (const x of [-1, 1]) {
-      const ear = scaledBox(0.16, 0.05, 0.1, pink);
-      ear.position.set(x * 0.22, 1.18, -0.9);
-      ear.rotation.z = x * 0.55;
+      const ear = scaledBox(0.13, 0.045, 0.08, pink);
+      ear.position.set(x * 0.16, 1.04, -0.88);
+      ear.rotation.z = x * 1.05;
+      ear.rotation.x = 0.2;
       const horn = new THREE.Mesh(cone, dark);
-      horn.scale.set(0.045, 0.18, 0.045);
-      horn.position.set(x * 0.12, 1.32, -0.9);
-      horn.rotation.z = -x * 0.4;
-      group.add(ear, horn);
+      horn.scale.set(0.035, 0.2, 0.035);
+      horn.position.set(x * 0.1, 1.26, -0.84);
+      horn.rotation.z = -x * 0.85;
+      const eye = scaledBox(0.045, 0.05, 0.025, dark);
+      eye.position.set(x * 0.13, 1.12, -1.02);
+      const shine = scaledBox(0.016, 0.016, 0.012, hide);
+      shine.position.set(x * 0.14, 1.135, -1.035);
+      group.add(ear, horn, eye, shine);
     }
-    const udder = new THREE.Mesh(sphere, pink);
-    udder.scale.set(0.14, 0.12, 0.16);
-    udder.position.set(0, 0.4, 0.46);
+    const udder = new THREE.Mesh(foliage, pink);
+    udder.scale.set(0.12, 0.1, 0.14);
+    udder.position.set(0, 0.36, 0.32);
     group.add(udder);
-    for (const x of [-0.05, 0.05]) {
+    for (const x of [-0.045, 0.045]) {
       const teat = scaledBox(0.025, 0.08, 0.025, pink);
-      teat.position.set(x, 0.26, 0.46);
+      teat.position.set(x, 0.22, 0.34);
       group.add(teat);
     }
-    const tail = scaledBox(0.04, 0.38, 0.04, dark);
-    tail.position.set(0, 0.86, 0.92);
-    tail.rotation.x = 0.85;
-    const tuft = new THREE.Mesh(sphere, dark);
+    const tail = scaledBox(0.035, 0.36, 0.035, dark);
+    tail.position.set(0, 0.62, 0.74);
+    tail.rotation.x = 2.2;
+    const tuft = new THREE.Mesh(foliage, dark);
     tuft.scale.set(0.08, 0.08, 0.08);
-    tuft.position.set(0, 0.62, 1.08);
+    tuft.position.set(0, 0.48, 0.96);
     group.add(tail, tuft);
-    for (const [x, z] of [[-0.22, -0.42], [0.22, -0.42], [-0.24, 0.52], [0.24, 0.52]]) {
-      const leg = scaledBox(0.1, 0.5, 0.1, hide);
-      leg.position.set(x, 0.3, z);
-      const hoof = scaledBox(0.12, 0.07, 0.14, hoofMat);
-      hoof.position.set(x, 0.04, z - 0.02);
-      group.add(leg, hoof);
-    }
+    // Thigh pivots, knee bends back. Hoof sits near the ground.
+    const addLeg = (x, z, front) => {
+      const hipPivot = new THREE.Group();
+      hipPivot.position.set(x, 0.5, z);
+      hipPivot.rotation.x = front ? 0.42 : -0.38;
+      const thigh = scaledBox(0.1, 0.26, 0.11, hide);
+      thigh.position.y = -0.13;
+      const knee = new THREE.Group();
+      knee.position.y = -0.26;
+      knee.rotation.x = front ? -0.9 : 0.72;
+      const shin = scaledBox(0.055, 0.2, 0.06, hide);
+      shin.position.y = -0.1;
+      const hoof = scaledBox(0.08, 0.055, 0.1, hoofMat);
+      hoof.position.set(0, -0.22, 0);
+      knee.add(shin, hoof);
+      hipPivot.add(thigh, knee);
+      group.add(hipPivot);
+    };
+    addLeg(-0.2, -0.32, true);
+    addLeg(0.2, -0.32, true);
+    addLeg(-0.22, 0.4, false);
+    addLeg(0.22, 0.4, false);
     return group;
   }
 
@@ -770,23 +1206,51 @@ export function createProps(THREE, materials) {
     const group = new THREE.Group();
     const woolMat = materials.lambert(0xf7f4ee, { flat: true });
     const black = materials.lambert(0x1a1a1a, { flat: true });
-    const wool = new THREE.Mesh(foliage, woolMat);
-    wool.scale.set(0.4, 0.34, 0.48);
-    wool.position.set(0, 0.5, 0.02);
-    const head = new THREE.Mesh(sphere, black);
-    head.scale.set(0.11, 0.11, 0.14);
-    head.position.set(0, 0.52, -0.46);
-    group.add(wool, head);
-    for (const x of [-1, 1]) {
-      const ear = scaledBox(0.1, 0.035, 0.06, black);
-      ear.position.set(x * 0.14, 0.56, -0.38);
-      ear.rotation.z = x * 0.6;
-      group.add(ear);
+    const woolShade = materials.lambert(0xe4ddd2, { flat: true });
+    const pale = materials.lambert(0xf4f1ea, { flat: true });
+    // A long fleece, not a ball. The face sits in front of it on a short neck.
+    const puffs = [
+      [0, 0.5, 0.12, 0.32, 0.26, 0.36, woolMat],
+      [0, 0.48, 0.4, 0.22, 0.2, 0.18, woolShade],
+      [0, 0.7, 0.12, 0.26, 0.12, 0.28, woolShade],
+      [-0.2, 0.5, 0.12, 0.14, 0.16, 0.22, woolMat],
+      [0.2, 0.48, 0.16, 0.14, 0.15, 0.2, woolShade],
+      [0, 0.5, -0.1, 0.16, 0.14, 0.12, woolMat],
+    ];
+    for (const [x, y, z, sx, sy, sz, material] of puffs) {
+      const puff = new THREE.Mesh(foliage, material);
+      puff.scale.set(sx, sy, sz);
+      puff.position.set(x, y, z);
+      group.add(puff);
     }
-    for (const [x, z] of [[-0.14, -0.12], [0.14, -0.12], [-0.14, 0.18], [0.14, 0.18]]) {
-      const leg = scaledBox(0.06, 0.24, 0.06, black);
-      leg.position.set(x, 0.12, z);
-      group.add(leg);
+    const neck = scaledBox(0.1, 0.14, 0.24, black);
+    neck.position.set(0, 0.48, -0.26);
+    const head = new THREE.Mesh(chunky, black);
+    head.scale.set(0.13, 0.12, 0.14);
+    head.position.set(0, 0.52, -0.46);
+    const muzzle = scaledBox(0.1, 0.065, 0.09, black);
+    muzzle.position.set(0, 0.46, -0.56);
+    group.add(neck, head, muzzle);
+    for (const x of [-1, 1]) {
+      const ear = scaledBox(0.045, 0.16, 0.035, black);
+      ear.position.set(x * 0.14, 0.38, -0.44);
+      ear.rotation.z = x * 0.25;
+      const eye = scaledBox(0.032, 0.036, 0.02, pale);
+      eye.position.set(x * 0.06, 0.55, -0.54);
+      const pupil = scaledBox(0.016, 0.02, 0.012, black);
+      pupil.position.set(x * 0.065, 0.548, -0.552);
+      group.add(ear, eye, pupil);
+    }
+    const tail = new THREE.Mesh(foliage, woolShade);
+    tail.scale.set(0.07, 0.07, 0.06);
+    tail.position.set(0, 0.52, 0.56);
+    group.add(tail);
+    for (const [x, z] of [[-0.14, -0.02], [0.14, -0.02], [-0.15, 0.28], [0.15, 0.28]]) {
+      const leg = scaledBox(0.055, 0.26, 0.055, black);
+      leg.position.set(x, 0.15, z);
+      const hoof = scaledBox(0.065, 0.04, 0.07, black);
+      hoof.position.set(x, 0.03, z);
+      group.add(leg, hoof);
     }
     return group;
   }
@@ -798,13 +1262,13 @@ export function createProps(THREE, materials) {
   function createDog(rand) {
     const group = new THREE.Group();
     const fur = materials.lambert(pick([0xc4a574, 0x3a2a22, 0xf2efe8, 0x2a2a2a, 0x8a5a32], rand), { flat: true });
-    const body = new THREE.Mesh(sphere, fur);
+    const body = new THREE.Mesh(foliage, fur);
     body.scale.set(0.14, 0.11, 0.22);
     body.position.y = 0.2;
-    const head = new THREE.Mesh(sphere, fur);
+    const head = new THREE.Mesh(foliage, fur);
     head.scale.set(0.09, 0.09, 0.1);
     head.position.set(0, 0.3, -0.18);
-    const snout = new THREE.Mesh(sphere, fur);
+    const snout = new THREE.Mesh(foliage, fur);
     snout.scale.set(0.05, 0.045, 0.07);
     snout.position.set(0, 0.26, -0.26);
     const tail = scaledBox(0.03, 0.12, 0.03, fur);
@@ -818,7 +1282,7 @@ export function createProps(THREE, materials) {
     }
     // Collar sits ahead of the walker. The leash runs back up to the right hand.
     const collar = new THREE.Vector3(0, 0.32, -0.04);
-    const hand = new THREE.Vector3(-0.16, 0.5, 0.62);
+    const hand = new THREE.Vector3(-0.18, 0.86, 0.58);
     const span = hand.clone().sub(collar);
     const length = span.length();
     const leash = scaledBox(0.012, 0.012, length, materials.lambert(0x222222, { flat: true }));

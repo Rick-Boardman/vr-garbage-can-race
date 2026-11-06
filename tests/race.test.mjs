@@ -47,6 +47,7 @@ import {
   vehicleMayHit,
 } from "../src/town.js";
 import { AWNING_PITCH, BENCH, SIGN_BOARD_Z, SIGN_POLE_Z, SITTER, animatePerson, createFlop, createProps, stepFlop } from "../src/props.js";
+import { createDaylight } from "../src/daylight.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "../src/look.js";
 
 test("the hill drops and the frame stays right-handed", () => {
@@ -1405,4 +1406,64 @@ test("a thrown person flops and a truck has a cab, bed, and grille", () => {
   const bus = props.createCar(() => 0.5, "bus");
   assert.ok(bus.getObjectByName("muffler"), "bus muffler");
   assert.equal(bus.userData.exhaust.smoke, false);
+});
+
+test("a walker bends the forward knee and a tree is a cluster", () => {
+  const props = createProps(THREE, { lambert: () => new THREE.MeshLambertMaterial() });
+  const person = props.createPerson(() => 0.2, "walk");
+  let forwardBent = 0;
+  let backStraight = 0;
+  let minFoot = 10;
+  let maxFoot = -10;
+  const footAt = new THREE.Vector3();
+  for (let step = 0; step < 48; step += 1) {
+    person.position.y = 0;
+    animatePerson(person, step * 0.07);
+    person.updateMatrixWorld(true);
+    const thigh = person.userData.limbs.legL.rotation.x;
+    const knee = person.userData.limbs.kneeL.rotation.x;
+    if (thigh > 0.2 && knee < -0.5) forwardBent += 1;
+    if (thigh < -0.2 && knee > -0.25) backStraight += 1;
+    person.userData.limbs.footL.getWorldPosition(footAt);
+    minFoot = Math.min(minFoot, footAt.y);
+    maxFoot = Math.max(maxFoot, footAt.y);
+  }
+  assert.ok(forwardBent > 3, `forward knee ${forwardBent}`);
+  assert.ok(backStraight > 3, `back knee ${backStraight}`);
+  assert.ok(minFoot > -0.02 && minFoot < 0.22, `low foot ${minFoot}`);
+  assert.ok(maxFoot < 0.45, `high foot ${maxFoot}`);
+
+  person.position.y = 0;
+  person.userData.pose = "ride";
+  animatePerson(person, 0);
+  person.updateMatrixWorld(true);
+  const handAt = new THREE.Vector3();
+  person.userData.limbs.handR.getWorldPosition(handAt);
+  assert.ok(handAt.z < -0.12, `ride hand ${handAt.z}`);
+
+  let facets = 0;
+  person.traverse((object) => {
+    if (object.geometry?.type === "IcosahedronGeometry") facets += 1;
+  });
+  assert.ok(facets >= 2, `head facets ${facets}`);
+
+  const tree = props.createTree(() => 0.4);
+  let puffs = 0;
+  tree.traverse((object) => {
+    if (object.geometry?.type === "IcosahedronGeometry") puffs += 1;
+  });
+  assert.ok(puffs >= 4, `tree puffs ${puffs}`);
+});
+
+test("dusk is a warm sunset and far buildings still fade", () => {
+  const scene = new THREE.Scene();
+  const lighting = createDaylight(THREE, scene);
+  const course = { districts: [{ time: "dusk" }, { time: "dusk" }] };
+  lighting.apply(course, 20, new THREE.Vector3());
+  assert.equal(scene.fog.near, 45);
+  assert.ok(Math.abs(scene.fog.far - 140) < 0.01, `fog far ${scene.fog.far}`);
+  const sun = scene.children.find((child) => child.isDirectionalLight);
+  assert.ok(sun.intensity > 1.1, `sun ${sun.intensity}`);
+  assert.ok(sun.color.r > sun.color.b, "sun is warm");
+  assert.ok(scene.fog.color.r > scene.fog.color.g, "fog stays a warm fade");
 });
