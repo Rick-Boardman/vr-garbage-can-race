@@ -939,6 +939,88 @@ test("a resting can sits on its bottom, top, or side", () => {
     hazards: [],
   });
   assert.ok(Math.abs(state.eject.canTilt - 2.4) < 0.05, `airborne tilt snapped to ${state.eject.canTilt}`);
+
+  state.eject.canHop = 0;
+  state.eject.canVy = 0;
+  state.eject.canSpeed = 0.8;
+  state.eject.canLat = 0;
+  state.eject.canTilt = 1.2;
+  stepRide(state, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    sample: sampleCourse(course, state.s),
+    canSample: sampleCourse(course, state.eject.canS),
+    hazards: [],
+  });
+  assert.equal(state.eject.canTilt, Math.PI / 2);
+  assert.ok(state.eject.canSpeed > 0.4, "a grounded can may still coast");
+});
+
+test("an ejected can falls out of a bus instead of climbing", () => {
+  const course = createCourse(7);
+  const state = createRideState(80);
+  const at = sampleCourse(course, 80);
+  stepRide(state, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    jump: true,
+    sample: at,
+    hazards: [],
+  });
+  state.eject.canHop = 6;
+  state.eject.canVy = 0;
+  state.eject.canSpeed = 0;
+  state.eject.canLat = 0;
+  state.eject.canTilt = 0.4;
+  state.eject.bodyS = state.eject.canS + 30;
+  const home = sampleCourse(course, state.eject.canS);
+  const bus = {
+    id: "bus",
+    kind: "car",
+    x: home.x + home.right.x * state.eject.canOffset,
+    z: home.z + home.right.z * state.eject.canOffset,
+    halfL: 4.9,
+    halfW: 1.28,
+    fx: home.forward.x,
+    fz: home.forward.z,
+    rx: home.right.x,
+    rz: home.right.z,
+  };
+  let maxHop = state.eject.canHop;
+  let minLate = Infinity;
+  for (let step = 0; step < 200; step += 1) {
+    const sample = sampleCourse(course, state.eject.canS);
+    const falling = step < 120;
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 0,
+      sample: sampleCourse(course, state.s),
+      canSample: sample,
+      hazards: falling
+        ? [
+          bus,
+          {
+            id: `hole-${step}`,
+            kind: "pothole",
+            x: sample.x + sample.right.x * state.eject.canOffset,
+            z: sample.z + sample.right.z * state.eject.canOffset,
+            radius: 2,
+          },
+        ]
+        : [],
+    });
+    assert.ok(state.eject, "remounted while the can was up");
+    maxHop = Math.max(maxHop, state.eject.canHop);
+    if (step > 30) minLate = Math.min(minLate, state.eject.canHop);
+  }
+  assert.ok(maxHop < 6.4, `climbed to ${maxHop}`);
+  assert.ok(minLate < 0.05, `never landed ${minLate}`);
+  assert.ok(state.eject.canHop < 0.04, `left in the air ${state.eject.canHop}`);
+  const face = [0, Math.PI / 2, -Math.PI / 2, Math.PI];
+  assert.ok(face.some((angle) => Math.abs(state.eject.canTilt - angle) < 1e-6), `tilt ${state.eject.canTilt}`);
 });
 
 test("a thrown rider tumbles through the bounce, then stands", () => {

@@ -256,17 +256,20 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
   eject.canLat *= Math.exp(-0.7 * step);
   eject.canS += eject.canSpeed * step;
   eject.canOffset = clamp(eject.canOffset + eject.canLat * step, -hard, hard);
-  const canSettled = eject.canHop < 0.04
-    && Math.abs(eject.canVy) < 0.35
-    && Math.abs(eject.canSpeed) < 0.45
-    && Math.abs(eject.canLat) < 0.45;
-  if (canSettled) {
+  // A steep grade keeps a slow coast above the old "fully stopped" test, so the
+  // tilt never snapped and ground clearance held the can in the air. Once it is
+  // on the road, lock it to its bottom, top, or a side. It may still roll.
+  const canGrounded = eject.canHop < 0.04 && Math.abs(eject.canVy) < 0.35;
+  if (canGrounded) {
     eject.canTilt = restCanTilt(eject.canTilt || 0);
-    eject.canSpin *= Math.exp(-4 * step);
+    if (Math.abs(eject.canSpeed) < 0.45 && Math.abs(eject.canLat) < 0.45) {
+      eject.canSpin *= Math.exp(-4 * step);
+    }
   } else {
     eject.canSpin += (eject.canSpeed * 0.85 + eject.canLat * 0.4) * step;
     eject.canTilt = (eject.canTilt || 0) + (eject.canSpeed * 1.15 + eject.canLat * 0.4) * step;
   }
+  eject.popCool = Math.max(0, (eject.popCool || 0) - step);
 
   eject.bodyVy = (eject.bodyVy || 0) - GRAVITY * step;
   eject.bodyHop = (eject.bodyHop || 0) + eject.bodyVy * step;
@@ -320,16 +323,28 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
   eject.canS = canClear.s;
   eject.canOffset = canClear.offset;
   if (hazards && coast) {
-    const canX = coast.x + coast.right.x * eject.canOffset + coast.forward.x * (eject.canS - coast.s);
-    const canZ = coast.z + coast.right.z * eject.canOffset + coast.forward.z * (eject.canS - coast.s);
+    let canX = coast.x + coast.right.x * eject.canOffset + coast.forward.x * (eject.canS - coast.s);
+    let canZ = coast.z + coast.right.z * eject.canOffset + coast.forward.z * (eject.canS - coast.s);
     for (const hazard of hazards) {
-      if (!hazard || state.hitCooldown[hazard.id]) continue;
+      if (!hazard?.id) continue;
       if (hazard.kind !== "cone" && hazard.kind !== "pothole" && hazard.kind !== "car") continue;
       const hit = overlap(canX, canZ, hazard);
       if (!hit) continue;
       const lateral = hit.px * coast.right.x + hit.pz * coast.right.z;
       const side = Math.sign(lateral || eject.canOffset || 1) || 1;
+      if (hazard.kind === "car") {
+        // The overlap test ignores height. A can left inside the bus kept
+        // taking hits and never fell. Push it out of the footprint.
+        const along = hit.px * coast.forward.x + hit.pz * coast.forward.z;
+        const push = hit.pen + 0.2;
+        eject.canS += along * push;
+        eject.canOffset += lateral * push;
+        canX += hit.px * push;
+        canZ += hit.pz * push;
+      }
+      if (state.hitCooldown[hazard.id]) continue;
       if (hazard.kind === "cone") {
+        if (eject.canHop > 0.35) continue;
         state.events.push({
           type: "flew",
           id: hazard.id,
@@ -339,7 +354,16 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
         });
         eject.canSpeed *= 0.92;
         eject.canLat += side * 1.2;
-      } else if (hazard.kind === "pothole") {
+        state.hitCooldown[hazard.id] = 0.7;
+        continue;
+      }
+      // One upward kick until this bounce lands. Refreshing canVy on every
+      // overlap, or from a second hazard while still airborne, climbs forever.
+      if (eject.popCool > 0 || eject.canHop > 0.15) {
+        state.hitCooldown[hazard.id] = 0.7;
+        continue;
+      }
+      if (hazard.kind === "pothole") {
         eject.canSpeed *= 0.72;
         eject.canVy = Math.max(eject.canVy, 1.4);
       } else {
@@ -347,8 +371,11 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
         eject.canLat += side * 1.8;
         eject.canVy = Math.max(eject.canVy, 2.2);
       }
+      eject.popCool = 0.55;
       state.hitCooldown[hazard.id] = 0.7;
     }
+    eject.canOffset = clamp(eject.canOffset, -hard, hard);
+    if (eject.canS < 0) eject.canS = 0;
   }
   const thrown = Math.sign(eject.bodyAlong) || Math.sign(alongRoad) || 1;
   const bodyImpact = Math.hypot(eject.bodyAlong || 0, eject.bodyLat || 0);
