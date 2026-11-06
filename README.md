@@ -2,7 +2,7 @@
 
 Work on the game continues in this repository. The sealed one-prompt example remains at [vr-garbage-can-race](https://github.com/Rick-Boardman/vr-garbage-can-race) commit `fa35c1f`.
 
-A person sits in a garbage can and rolls an endless hill through a low-poly town. Parked cars, moving cars, people, and potholes get in the way. The road runs through downtown blocks, house rows, and a market street, at dawn, day, dusk, or night.
+A person stands in a garbage can and rolls an endless hill through a low-poly town. Parked cars, moving cars, people, potholes, and oil slicks get in the way. The road runs through downtown blocks, house rows, a market street, pastures, forest, and the shore, at dawn, day, dusk, or night.
 
 The sealed repository is a capability demo of two pieces that stay in their own lanes:
 
@@ -26,7 +26,7 @@ Grok 4.7 then:
 - Mapped the ride onto that input. A and D steer. W, Shift, and X tuck to go faster. S brakes. V or 1, 2, and 3 switch the camera. N starts a new hill.
 - Built the endless course, three district types, traffic, pedestrians, potholes, the rider, and dawn-to-night lighting. The opening district stays day or dawn so the first stretch is readable. Later districts include dusk and night. Night stays lit enough to play. Buildings, cars, people, and the can are procedural meshes and canvas textures.
 - Fed VR from Halo's controller poses. The lower hand steers to that side. Dropping both controllers speeds up. Raising them slows down. The headset still looks around. Phone tilt uses `DeviceOrientation` after a user gesture, including the iOS permission request. If tilt is denied on a coarse pointer, look offset steers and look pitch throttles.
-- Drew the race readout in Halo's WebGL HUD: a HILL window and a hotbar with CAM, TILT, and NEW. The debug and help slots are not reserved.
+- Drew the race readout in Halo's WebGL HUD: a HILL window and a hotbar with CAM and NEW. The debug and help slots are not reserved. Phone tilt is the phone itself, after the browser allows motion.
 - Checked the desktop build in a browser. The can rolled downhill, A pulled it left, and all three cameras rendered with an empty console. `npm test` covers the downhill frame, the hand and tilt signs, and collisions.
 
 A physical headset and a physical phone were not part of that check. The VR and tilt paths are implemented and unit-tested. They have not been run on a Quest or a handset.
@@ -76,7 +76,7 @@ Open http://127.0.0.1:8090. The server binds `127.0.0.1`. `PORT` chooses another
 | V, or 1 / 2 / 3 | First person, just behind, way back |
 | N, or the NEW slot | New hill. The session best remains |
 | VR controllers | Lower hand steers that way. Both low is faster. Both high leans back and slows down |
-| Phone tilt | Tilt steers. Lean forward goes faster. Lean back slows down. The TILT slot recalibrates |
+| Phone tilt | Tilt the phone to steer. Lean forward goes faster. Lean back slows down. The first sample is neutral |
 
 WebXR needs HTTPS off localhost, and a browser that can start an immersive session.
 

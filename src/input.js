@@ -12,6 +12,21 @@ function deadzone(value, threshold) {
   return Math.abs(value) < threshold ? 0 : value;
 }
 
+// On foot, Q turns left and E turns right. A and D are strafe, not added here,
+// or they would also steer the can while riding. Space jumps.
+export function onFootSteer(steer, keys) {
+  const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
+  let next = steer || 0;
+  if (down("Q")) next -= 1;
+  if (down("E")) next += 1;
+  return clamp(next, -1, 1);
+}
+
+export function onFootJump(keys) {
+  const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
+  return down(" ") || down("Space");
+}
+
 export function inputFromKeys({ keys, autoWalk = false, lookSteer = null }) {
   const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
   let steer = 0;
@@ -72,7 +87,7 @@ export function inputFromTilt({ steerDeg, leanDeg, neutralSteer = 0, neutralLean
 
 export function selectRideInput({ presenting, hands, tilt, keys, preferTilt = false }) {
   if (presenting && hands) return { ...hands, source: "vr" };
-  const keyActive = !!keys && (keys.steer !== 0 || keys.throttle !== 0);
+  const keyActive = !!keys && (keys.steer !== 0 || keys.throttle !== 0 || (keys.strafe || 0) !== 0);
   // A phone wants tilt even while a key is down. On a desktop, held keys win
   // so a stray orientation event cannot cancel A/D.
   if (tilt && (preferTilt || !keyActive)) return { ...tilt, source: "tilt" };

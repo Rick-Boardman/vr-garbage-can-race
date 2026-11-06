@@ -52,6 +52,45 @@ export function createMaterials(THREE) {
     return material;
   }
 
+  function slick() {
+    const key = "slick";
+    let material = cache.get(key);
+    if (material) return material;
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, 128, 128);
+    ctx.fillStyle = "rgba(12, 14, 16, 0.88)";
+    ctx.beginPath();
+    ctx.moveTo(28, 70);
+    ctx.bezierCurveTo(18, 36, 48, 14, 78, 24);
+    ctx.bezierCurveTo(112, 34, 122, 58, 108, 84);
+    ctx.bezierCurveTo(94, 114, 52, 120, 30, 98);
+    ctx.bezierCurveTo(16, 84, 22, 78, 28, 70);
+    ctx.fill();
+    ctx.fillStyle = "rgba(28, 32, 36, 0.55)";
+    ctx.beginPath();
+    ctx.ellipse(74, 58, 28, 16, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(186, 214, 196, 0.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(40, 78);
+    ctx.quadraticCurveTo(72, 58, 98, 70);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(120, 168, 210, 0.28)";
+    ctx.beginPath();
+    ctx.moveTo(46, 70);
+    ctx.quadraticCurveTo(76, 52, 96, 62);
+    ctx.stroke();
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    material = new THREE.MeshLambertMaterial({ map: texture, transparent: true, depthWrite: false });
+    cache.set(key, material);
+    return material;
+  }
+
   function facade(base, litChance, salt) {
     const key = cacheKey("facade", base, `${litChance}:${salt}`);
     return canvasTexture((ctx, width, height) => {
@@ -139,6 +178,7 @@ export function createMaterials(THREE) {
     facade,
     awning,
     sign,
+    slick,
     headlight,
     taillight,
     bulb,

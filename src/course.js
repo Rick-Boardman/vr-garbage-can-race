@@ -8,13 +8,25 @@ import {
   START_Y,
 } from "./constants.js";
 
-const THEMES = ["downtown", "neighborhood", "market"];
+const THEMES = ["downtown", "neighborhood", "market", "country", "ocean", "forest"];
 const TIMES = ["dawn", "day", "dusk", "night"];
 const NAMES = {
   downtown: ["Brickworks", "Glasshouse Row", "Station Hill", "Lantern Avenue"],
   neighborhood: ["Elm Court", "Cedar Hill", "Maple Bend", "Orchard Lane"],
   market: ["Market Street", "Taxi Bend", "Cafe Corner", "Bus Stop Hill"],
+  country: ["Pasture Hill", "Fence Line", "Dairy Bend", "Sheep Ridge"],
+  ocean: ["Tide Road", "Boardwalk", "Cove Hill", "Pier Street"],
+  forest: ["Pine Hollow", "Switchback Woods", "Cedar Cut", "Fern Hill"],
 };
+
+function halfWidthFor(theme) {
+  if (theme === "neighborhood") return 6.1;
+  if (theme === "market") return 7.1;
+  if (theme === "country") return 5.6;
+  if (theme === "ocean") return 6.4;
+  if (theme === "forest") return 5.4;
+  return 7.8;
+}
 
 export function wrapAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -55,7 +67,8 @@ function makeDistrict(rand, index) {
     curveAmp: 0.004 + rand() * 0.009,
     curveFreq: 0.007 + rand() * 0.012,
     phase: rand() * Math.PI * 2,
-    halfWidth: theme === "neighborhood" ? 6.1 : theme === "market" ? 7.1 : 7.8,
+    halfWidth: halfWidthFor(theme),
+    waterSide: rand() > 0.5 ? 1 : -1,
     name: NAMES[theme][Math.floor(rand() * NAMES[theme].length)],
   };
 }
@@ -192,6 +205,7 @@ export function sampleCourse(course, s) {
     theme: district.theme,
     time: district.time,
     name: district.name,
+    waterSide: district.waterSide,
     psi,
   };
 }

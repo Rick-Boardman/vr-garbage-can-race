@@ -18,6 +18,9 @@ const types = {
   ".woff": "font/woff",
   ".png": "image/png",
   ".wasm": "application/wasm",
+  ".ogg": "audio/ogg",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
 };
 
 function localPath(urlPath) {
