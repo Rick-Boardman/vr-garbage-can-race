@@ -194,6 +194,69 @@ export function createProps(THREE, materials) {
     return mesh;
   }
 
+  // The detail pass made dozens of meshes per building and car. Same-material
+  // parts become one mesh so the town does not turn into tens of thousands of draw calls.
+  function heldBack(mesh) {
+    if (mesh.name || mesh.userData.keep) return true;
+    const material = mesh.material;
+    if (!material || Array.isArray(material)) return true;
+    if (material.map) return true;
+    if (material.transparent && material.opacity < 1) return true;
+    if (material.emissive && material.emissive.getHex() !== 0) return true;
+    return false;
+  }
+
+  function bakeStatic(group) {
+    group.updateMatrixWorld(true);
+    const inverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+    const buckets = new Map();
+    const walk = (object) => {
+      if (object !== group && object.userData.keep) return;
+      if (object.isMesh && !heldBack(object)) {
+        const list = buckets.get(object.material);
+        if (list) list.push(object);
+        else buckets.set(object.material, [object]);
+      }
+      for (const child of object.children) walk(child);
+    };
+    walk(group);
+    const vertex = new THREE.Vector3();
+    const facing = new THREE.Vector3();
+    for (const [material, meshes] of buckets) {
+      if (meshes.length < 2) continue;
+      const positions = [];
+      const normals = [];
+      for (const mesh of meshes) {
+        const geometry = mesh.geometry;
+        const position = geometry.attributes.position;
+        const normal = geometry.attributes.normal;
+        const index = geometry.index;
+        const matrix = new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld);
+        const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+        const count = index ? index.count : position.count;
+        for (let i = 0; i < count; i += 1) {
+          const slot = index ? index.getX(i) : i;
+          vertex.fromBufferAttribute(position, slot).applyMatrix4(matrix);
+          positions.push(vertex.x, vertex.y, vertex.z);
+          if (normal) facing.fromBufferAttribute(normal, slot).applyMatrix3(normalMatrix).normalize();
+          else facing.set(0, 1, 0);
+          normals.push(facing.x, facing.y, facing.z);
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+      const merged = new THREE.Mesh(geometry, material);
+      merged.matrixAutoUpdate = false;
+      merged.updateMatrix();
+      group.add(merged);
+      for (const mesh of meshes) {
+        mesh.parent.remove(mesh);
+        if (!mesh.geometry.userData.shared) mesh.geometry.dispose();
+      }
+    }
+  }
+
   function gable(width, height, depth, material) {
     const hw = width / 2;
     const hd = depth / 2;
@@ -240,6 +303,8 @@ export function createProps(THREE, materials) {
     const fringe = new THREE.Mesh(foliage, hairMat);
     fringe.scale.set(0.13, 0.055, 0.08);
     fringe.position.set(0, 0.05, -0.11);
+    hairCap.userData.keep = true;
+    fringe.userData.keep = true;
     headPivot.add(hairCap, fringe);
     const nose = new THREE.Mesh(cone, skin);
     nose.scale.set(0.042, 0.08, 0.042);
@@ -257,6 +322,7 @@ export function createProps(THREE, materials) {
       ear.position.set(x * 2.35, 0, 0.02);
       headPivot.add(eye, brow, ear);
     }
+    bakeStatic(headPivot);
     group.add(headPivot);
 
     const hipY = 0.9;
@@ -294,6 +360,7 @@ export function createProps(THREE, materials) {
       thumb.position.set(x > 0 ? -0.05 : 0.05, 0.02, -0.02);
       thumb.rotation.z = x > 0 ? 0.7 : -0.7;
       hand.add(palm, thumb);
+      bakeStatic(hand);
       elbow.add(forearm, hand);
       shoulder.add(upper, elbow);
       return { shoulder, elbow, hand };
@@ -348,6 +415,7 @@ export function createProps(THREE, materials) {
       blob.rotation.y = rand() * Math.PI;
       group.add(blob);
     }
+    bakeStatic(group);
     return group;
   }
 
@@ -361,6 +429,7 @@ export function createProps(THREE, materials) {
     bulb.scale.set(0.2, 0.14, 0.2);
     bulb.position.set(0.75, 4.08, 0);
     group.add(pole, arm, bulb);
+    bakeStatic(group);
     return group;
   }
 
@@ -379,6 +448,7 @@ export function createProps(THREE, materials) {
       hub.scale.set(scale * 0.38, scale * 0.38, scale * 0.22);
       hub.position.x = Math.sign(x || 1) * 0.13 * scale;
       pivot.add(mesh, hub);
+      pivot.userData.keep = true;
       group.add(pivot);
       wheels.push(pivot);
     }
@@ -500,6 +570,7 @@ export function createProps(THREE, materials) {
     group.userData.halfL = 2.15;
     group.userData.halfW = 0.95;
     group.userData.roof = cop ? 1.74 : 1.45;
+    bakeStatic(group);
     return group;
   }
 
@@ -557,6 +628,7 @@ export function createProps(THREE, materials) {
     const shield = materials.lambert(0x9fd0ea, { flat: true, opacity: 0.9 });
     for (const x of [-0.44, 0.44]) {
       const wind = scaledBox(0.78, 0.48, 0.06, shield);
+      wind.userData.keep = true;
       wind.position.set(x, 1.42, -1.98);
       wind.rotation.x = 0.28;
       group.add(wind);
@@ -634,6 +706,7 @@ export function createProps(THREE, materials) {
     group.userData.halfL = 3.35;
     group.userData.halfW = 1.15;
     group.userData.roof = 1.95;
+    bakeStatic(group);
     return group;
   }
 
@@ -661,6 +734,7 @@ export function createProps(THREE, materials) {
         const bezel = scaledBox(0.04, 0.74, 1.42, frameMat);
         bezel.position.set(Math.sign(x) * 1.18, 2.05, z);
         const win = scaledBox(0.08, 0.62, 1.28, pane);
+        win.userData.keep = true;
         win.position.set(x, 2.05, z);
         group.add(bezel, win);
       }
@@ -695,6 +769,7 @@ export function createProps(THREE, materials) {
     const shield = materials.lambert(0x7ec8e8, { flat: true, opacity: 0.94, emissive: 0x163848 });
     for (const x of [-0.52, 0.52]) {
       const windshield = scaledBox(0.92, 0.78, 0.1, shield);
+      windshield.userData.keep = true;
       windshield.position.set(x, 1.96, -4.9);
       group.add(windshield);
     }
@@ -715,6 +790,7 @@ export function createProps(THREE, materials) {
     group.userData.halfL = 4.9;
     group.userData.halfW = 1.28;
     group.userData.roof = 2.72;
+    bakeStatic(group);
     return group;
   }
 
@@ -817,6 +893,7 @@ export function createProps(THREE, materials) {
     }
     group.userData.depth = depth;
     group.userData.width = width;
+    bakeStatic(group);
     return group;
   }
 
@@ -885,6 +962,7 @@ export function createProps(THREE, materials) {
     group.add(tank, antenna);
     group.userData.depth = depth;
     group.userData.width = width;
+    bakeStatic(group);
     return group;
   }
 
@@ -913,6 +991,7 @@ export function createProps(THREE, materials) {
     const letter = scaledBox(width * 0.24, 0.16, 0.03, materials.lambert(awningColor, { flat: true }));
     letter.position.set(width * 0.28, 2.15, front - 0.14);
     group.add(awningMesh, storeFrame, store, sill, doorFrame, shopDoor, board, letter);
+    bakeStatic(group);
     return group;
   }
 
@@ -923,6 +1002,7 @@ export function createProps(THREE, materials) {
     const back = scaledBox(1.6, 0.42, 0.08, wood());
     back.position.set(0, 0.78, BENCH.backZ);
     group.add(seat, back);
+    bakeStatic(group);
     return group;
   }
 
@@ -940,6 +1020,7 @@ export function createProps(THREE, materials) {
       post.position.set(-length / 2 + (posts === 1 ? 0 : (index / (posts - 1)) * length), 0.52, 0);
       group.add(post);
     }
+    bakeStatic(group);
     return group;
   }
 
@@ -950,6 +1031,7 @@ export function createProps(THREE, materials) {
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.16, 6), materials.lambert(0xdedede, { flat: true }));
     cap.position.y = 0.66;
     group.add(body, cap);
+    bakeStatic(group);
     return group;
   }
 
@@ -1008,7 +1090,12 @@ export function createProps(THREE, materials) {
     const sign = createSign("BUS");
     sign.position.set(1.9, 0, 0.2);
     group.add(sign);
+    bakeStatic(group);
     return group;
+  }
+
+  function shapePoint(angle, radius) {
+    return { x: Math.cos(angle) * radius, z: -Math.sin(angle) * radius };
   }
 
   function flatShape(radii, material, y) {
@@ -1028,54 +1115,71 @@ export function createProps(THREE, materials) {
     return mesh;
   }
 
+  // Raised broken lip around a dark mouth. Vertices stick up; the mesh
+  // origin stays on the road so the hole does not read as a mound.
+  function craterRim(outer, opening, material, raw) {
+    const positions = [];
+    const push = (point, y) => positions.push(point.x, y, point.z);
+    for (let index = 0; index < outer.length; index += 1) {
+      const next = (index + 1) % outer.length;
+      const a0 = (index / outer.length) * Math.PI * 2;
+      const a1 = (next / outer.length) * Math.PI * 2;
+      const lip0 = 0.05 + (raw[index] - 0.58) * 0.16;
+      const lip1 = 0.05 + (raw[next] - 0.58) * 0.16;
+      const o0 = shapePoint(a0, outer[index]);
+      const o1 = shapePoint(a1, outer[next]);
+      const n0 = shapePoint(a0, opening[index]);
+      const n1 = shapePoint(a1, opening[next]);
+      push(o0, lip0); push(n0, 0.028); push(o1, lip1);
+      push(n0, 0.028); push(n1, 0.028); push(o1, lip1);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    return new THREE.Mesh(geometry, material);
+  }
+
   function createPothole(rand) {
     const group = new THREE.Group();
-    const broken = materials.lambert(0x6e675c, { flat: true });
-    const crackMat = materials.lambert(0x1a1c20, { flat: true });
+    const asphalt = materials.lambert(0x4a5058, { flat: true });
+    const chip = materials.lambert(0x6a645c, { flat: true });
+    const rimMat = materials.lambert(0x5e656c, { flat: true, side: THREE.DoubleSide });
     const voidMat = materials.lambert(0x070809, { flat: true });
-    const pitMat = materials.lambert(0x120e0c, { flat: true });
-    const dirt = materials.lambert(0x4a301c, { flat: true });
-    const chunkMat = materials.lambert(0x4e555c, { flat: true });
+    const dirt = materials.lambert(0x2a1c14, { flat: true });
     const jagged = (count, min, span) => {
       const radii = [];
       for (let index = 0; index < count; index += 1) radii.push(min + rand() * span);
       return radii;
     };
     // Same rand count as before, so the rest of the chunk stays put.
-    // The big shape is the dark mouth. No pale ring, no gear of crack bars.
-    const lip = jagged(10, 0.55, 0.7);
-    const pit = jagged(9, 0.42, 0.28);
-    const floor = jagged(7, 0.18, 0.16);
-    const mouth = flatShape(lip, voidMat, 0.012);
-    const depth = flatShape(pit, pitMat, 0.02);
-    depth.position.x = -0.06;
-    depth.position.z = 0.04;
-    const soil = flatShape(floor.map((radius) => radius * 1.55), dirt, 0.028);
-    soil.position.x = 0.1;
-    soil.position.z = -0.06;
-    group.add(mouth, depth, soil);
-    lip.forEach((radius, index) => {
-      if (index % 2 === 0) return;
-      const angle = (index / lip.length) * Math.PI * 2 + index * 0.22;
-      const length = 0.36 + (index % 3) * 0.18;
-      const crack = scaledBox(0.028 + (index % 2) * 0.012, 0.008, length, crackMat);
-      const reach = radius * 0.7 + length * 0.38;
-      crack.position.set(Math.cos(angle) * reach, 0.016, Math.sin(angle) * reach * 0.74);
-      crack.rotation.y = -angle + 0.62;
-      group.add(crack);
+    // The raw span is a star. Compress it into a lumpy oval about a meter and a half across.
+    const raw = jagged(10, 0.58, 0.6);
+    const inner = jagged(9, 0.28, 0.2);
+    const floor = jagged(7, 0.14, 0.12);
+    const lip = raw.map((radius) => 0.74 + (radius - 0.58) * 0.38);
+    const opening = lip.map((radius, index) => {
+      const tuck = (inner[index % inner.length] - 0.28) / 0.2;
+      return radius * (0.84 + tuck * 0.08);
     });
+    const mouth = flatShape(opening.map((radius) => radius * 1.04), voidMat, 0.02);
+    group.add(mouth);
+    const soil = flatShape(floor.map((radius) => radius * 0.85), dirt, 0.026);
+    group.add(soil);
+    group.add(craterRim(lip, opening, rimMat, raw));
     const chunks = 6 + Math.floor(rand() * 3);
     for (let index = 0; index < chunks; index += 1) {
       const angle = rand() * Math.PI * 2;
-      const reach = 0.22 + rand() * 0.72;
-      const slab = scaledBox(0.14 + rand() * 0.2, 0.014, 0.07 + rand() * 0.1, rand() > 0.5 ? chunkMat : broken);
-      slab.position.set(Math.cos(angle) * reach, 0.032, Math.sin(angle) * reach * 0.8);
-      const tilt = 0.22 + rand() * 0.28;
-      slab.rotation.set(rand() > 0.5 ? tilt : -tilt, angle * 1.3, (rand() - 0.5) * 0.35);
-      const chip = scaledBox(0.08, 0.01, 0.05, chunkMat);
-      chip.position.set(Math.cos(angle + 0.8) * reach * 0.45, 0.024, Math.sin(angle + 1.1) * reach * 0.4);
-      chip.rotation.y = angle + 0.9;
-      group.add(slab, chip);
+      const reach = rand();
+      const width = 0.16 + rand() * 0.16;
+      const depth = 0.12 + rand() * 0.1;
+      const slab = scaledBox(width, 0.05, depth, rand() > 0.45 ? chip : asphalt);
+      const spoke = Math.floor((angle / (Math.PI * 2)) * lip.length) % lip.length;
+      const point = shapePoint(angle, lip[spoke] * (0.9 + reach * 0.14));
+      slab.position.set(point.x, 0.04, point.z);
+      // Local +Z is radial after the yaw, and a negative pitch lifts that outer edge.
+      const tilt = 0.5 + rand() * 0.45;
+      slab.rotation.set(-tilt, angle + Math.PI / 2, (rand() - 0.5) * 0.35);
+      group.add(slab);
     }
     return group;
   }
@@ -1103,102 +1207,86 @@ export function createProps(THREE, materials) {
     const hoofMat = materials.lambert(0x1a1614, { flat: true });
     const pink = materials.lambert(0xf0b0b8, { flat: true });
     const nose = materials.lambert(0xe7a090, { flat: true });
-    // Oval barrel. Local −z is the face. Chunky sphere reads rounder than the old prism.
-    const barrel = new THREE.Mesh(chunky, hide);
-    barrel.scale.set(0.38, 0.3, 0.62);
-    barrel.position.set(0, 0.74, 0.06);
-    const chest = new THREE.Mesh(foliage, hide);
-    chest.scale.set(0.32, 0.24, 0.28);
-    chest.position.set(0, 0.78, -0.36);
-    const hump = new THREE.Mesh(foliage, hide);
-    hump.scale.set(0.24, 0.14, 0.26);
-    hump.position.set(0, 1.02, -0.16);
-    const hip = new THREE.Mesh(foliage, hide);
-    hip.scale.set(0.3, 0.18, 0.26);
-    hip.position.set(0, 0.8, 0.46);
-    const belly = new THREE.Mesh(foliage, hide);
-    belly.scale.set(0.34, 0.14, 0.4);
-    belly.position.set(0, 0.5, 0.08);
-    group.add(barrel, chest, hump, hip, belly);
+    // One barrel, not a pile of gems. Local −z is the face.
+    const body = new THREE.Mesh(headGeo, hide);
+    body.scale.set(0.34, 0.26, 0.5);
+    body.position.set(0, 0.74, 0.04);
+    group.add(body);
     // Six rand() calls, same as the old spots, so the herd after this cow stays put.
     for (let index = 0; index < 3; index += 1) {
-      const spot = new THREE.Mesh(foliage, dark);
-      const jitter = (rand() - 0.5) * 0.1;
-      const along = (rand() - 0.4) * 0.7;
+      const jitter = (rand() - 0.5) * 0.06;
+      const along = (rand() - 0.35) * 0.5;
       const side = index === 0 ? 1 : -1;
-      spot.scale.set(0.05, 0.1 + index * 0.02, 0.14 + (index === 2 ? 0.06 : 0));
-      spot.position.set(side * 0.32 + jitter * side, 0.82 + (index === 2 ? 0.08 : 0), along);
+      const spot = scaledBox(0.07, 0.16 + index * 0.05, 0.2 + (index === 2 ? 0.08 : 0), dark);
+      spot.position.set(side * 0.3, 0.8 + (index === 1 ? 0.06 : 0), along + jitter);
       group.add(spot);
     }
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 0.38, 6), hide);
-    neck.position.set(0, 0.96, -0.62);
-    neck.rotation.x = -1.05;
-    const dewlap = scaledBox(0.08, 0.11, 0.06, pink);
-    dewlap.position.set(0, 0.84, -0.74);
-    dewlap.rotation.x = -0.45;
-    const head = new THREE.Mesh(chunky, hide);
-    head.scale.set(0.18, 0.16, 0.2);
-    head.position.set(0, 1.08, -0.92);
-    const snout = scaledBox(0.16, 0.09, 0.16, nose);
-    snout.position.set(0, 0.98, -1.08);
-    const nostrilL = scaledBox(0.035, 0.028, 0.02, dark);
-    nostrilL.position.set(-0.04, 0.96, -1.17);
-    const nostrilR = scaledBox(0.035, 0.028, 0.02, dark);
-    nostrilR.position.set(0.04, 0.96, -1.17);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.32, 6), hide);
+    neck.position.set(0, 0.92, -0.42);
+    neck.rotation.x = -0.85;
+    const dewlap = scaledBox(0.06, 0.1, 0.05, pink);
+    dewlap.position.set(0, 0.78, -0.52);
+    dewlap.rotation.x = -0.35;
+    const head = new THREE.Mesh(headGeo, hide);
+    head.scale.set(0.16, 0.13, 0.18);
+    head.position.set(0, 1.05, -0.7);
+    const snout = scaledBox(0.15, 0.1, 0.16, nose);
+    snout.position.set(0, 0.96, -0.88);
+    const nostrilL = scaledBox(0.035, 0.03, 0.02, dark);
+    nostrilL.position.set(-0.04, 0.94, -0.97);
+    const nostrilR = scaledBox(0.035, 0.03, 0.02, dark);
+    nostrilR.position.set(0.04, 0.94, -0.97);
     group.add(neck, dewlap, head, snout, nostrilL, nostrilR);
     for (const x of [-1, 1]) {
-      const ear = scaledBox(0.13, 0.045, 0.08, pink);
-      ear.position.set(x * 0.16, 1.04, -0.88);
-      ear.rotation.z = x * 1.05;
-      ear.rotation.x = 0.2;
+      const ear = scaledBox(0.14, 0.05, 0.07, pink);
+      ear.position.set(x * 0.18, 1.02, -0.64);
+      ear.rotation.z = x * 0.9;
       const horn = new THREE.Mesh(cone, dark);
-      horn.scale.set(0.035, 0.2, 0.035);
-      horn.position.set(x * 0.1, 1.26, -0.84);
-      horn.rotation.z = -x * 0.85;
-      const eye = scaledBox(0.045, 0.05, 0.025, dark);
-      eye.position.set(x * 0.13, 1.12, -1.02);
-      const shine = scaledBox(0.016, 0.016, 0.012, hide);
-      shine.position.set(x * 0.14, 1.135, -1.035);
+      horn.scale.set(0.04, 0.18, 0.04);
+      horn.position.set(x * 0.09, 1.22, -0.62);
+      horn.rotation.z = -x * 0.7;
+      const eye = scaledBox(0.05, 0.05, 0.03, dark);
+      eye.position.set(x * 0.1, 1.08, -0.82);
+      const shine = scaledBox(0.018, 0.018, 0.012, hide);
+      shine.position.set(x * 0.11, 1.095, -0.84);
       group.add(ear, horn, eye, shine);
     }
-    const udder = new THREE.Mesh(foliage, pink);
-    udder.scale.set(0.12, 0.1, 0.14);
-    udder.position.set(0, 0.36, 0.32);
+    const udder = scaledBox(0.16, 0.12, 0.16, pink);
+    udder.position.set(0, 0.4, 0.22);
     group.add(udder);
-    for (const x of [-0.045, 0.045]) {
-      const teat = scaledBox(0.025, 0.08, 0.025, pink);
-      teat.position.set(x, 0.22, 0.34);
+    for (const x of [-0.04, 0.04]) {
+      const teat = scaledBox(0.028, 0.07, 0.028, pink);
+      teat.position.set(x, 0.28, 0.24);
       group.add(teat);
     }
-    const tail = scaledBox(0.035, 0.36, 0.035, dark);
-    tail.position.set(0, 0.62, 0.74);
-    tail.rotation.x = 2.2;
+    const tail = scaledBox(0.04, 0.32, 0.04, dark);
+    tail.position.set(0, 0.62, 0.52);
+    tail.rotation.x = 0.7;
     const tuft = new THREE.Mesh(foliage, dark);
-    tuft.scale.set(0.08, 0.08, 0.08);
-    tuft.position.set(0, 0.48, 0.96);
+    tuft.scale.set(0.07, 0.07, 0.07);
+    tuft.position.set(0, 0.42, 0.64);
     group.add(tail, tuft);
-    // Thigh pivots, knee bends back. Hoof sits near the ground.
     const addLeg = (x, z, front) => {
       const hipPivot = new THREE.Group();
-      hipPivot.position.set(x, 0.5, z);
-      hipPivot.rotation.x = front ? 0.42 : -0.38;
-      const thigh = scaledBox(0.1, 0.26, 0.11, hide);
-      thigh.position.y = -0.13;
+      hipPivot.position.set(x, 0.56, z);
+      hipPivot.rotation.x = front ? 0.22 : -0.16;
+      const thigh = scaledBox(0.12, 0.28, 0.13, hide);
+      thigh.position.y = -0.14;
       const knee = new THREE.Group();
-      knee.position.y = -0.26;
-      knee.rotation.x = front ? -0.9 : 0.72;
-      const shin = scaledBox(0.055, 0.2, 0.06, hide);
-      shin.position.y = -0.1;
-      const hoof = scaledBox(0.08, 0.055, 0.1, hoofMat);
-      hoof.position.set(0, -0.22, 0);
+      knee.position.y = -0.28;
+      knee.rotation.x = front ? -0.55 : 0.4;
+      const shin = scaledBox(0.08, 0.22, 0.08, hide);
+      shin.position.y = -0.11;
+      const hoof = scaledBox(0.09, 0.06, 0.11, hoofMat);
+      hoof.position.set(0, -0.24, front ? -0.03 : 0.02);
       knee.add(shin, hoof);
       hipPivot.add(thigh, knee);
       group.add(hipPivot);
     };
-    addLeg(-0.2, -0.32, true);
-    addLeg(0.2, -0.32, true);
-    addLeg(-0.22, 0.4, false);
-    addLeg(0.22, 0.4, false);
+    addLeg(-0.16, -0.18, true);
+    addLeg(0.16, -0.18, true);
+    addLeg(-0.17, 0.28, false);
+    addLeg(0.17, 0.28, false);
     return group;
   }
 
@@ -1208,14 +1296,16 @@ export function createProps(THREE, materials) {
     const black = materials.lambert(0x1a1a1a, { flat: true });
     const woolShade = materials.lambert(0xe4ddd2, { flat: true });
     const pale = materials.lambert(0xf4f1ea, { flat: true });
-    // A long fleece, not a ball. The face sits in front of it on a short neck.
+    // A long fleece with a black face in front of it. Puffs keep the wool read.
+    const body = new THREE.Mesh(headGeo, woolMat);
+    body.scale.set(0.28, 0.22, 0.36);
+    body.position.set(0, 0.5, 0.02);
+    group.add(body);
     const puffs = [
-      [0, 0.5, 0.12, 0.32, 0.26, 0.36, woolMat],
-      [0, 0.48, 0.4, 0.22, 0.2, 0.18, woolShade],
-      [0, 0.7, 0.12, 0.26, 0.12, 0.28, woolShade],
-      [-0.2, 0.5, 0.12, 0.14, 0.16, 0.22, woolMat],
-      [0.2, 0.48, 0.16, 0.14, 0.15, 0.2, woolShade],
-      [0, 0.5, -0.1, 0.16, 0.14, 0.12, woolMat],
+      [0, 0.68, 0.04, 0.24, 0.1, 0.28, woolMat],
+      [0, 0.5, 0.26, 0.18, 0.16, 0.14, woolShade],
+      [-0.2, 0.52, 0.02, 0.12, 0.14, 0.18, woolShade],
+      [0.2, 0.5, 0.0, 0.12, 0.14, 0.18, woolMat],
     ];
     for (const [x, y, z, sx, sy, sz, material] of puffs) {
       const puff = new THREE.Mesh(foliage, material);
@@ -1223,34 +1313,32 @@ export function createProps(THREE, materials) {
       puff.position.set(x, y, z);
       group.add(puff);
     }
-    const neck = scaledBox(0.1, 0.14, 0.24, black);
-    neck.position.set(0, 0.48, -0.26);
-    const head = new THREE.Mesh(chunky, black);
-    head.scale.set(0.13, 0.12, 0.14);
-    head.position.set(0, 0.52, -0.46);
-    const muzzle = scaledBox(0.1, 0.065, 0.09, black);
-    muzzle.position.set(0, 0.46, -0.56);
+    const neck = scaledBox(0.14, 0.14, 0.24, black);
+    neck.position.set(0, 0.5, -0.28);
+    const head = new THREE.Mesh(sphere, black);
+    head.scale.set(0.14, 0.12, 0.15);
+    head.position.set(0, 0.54, -0.44);
+    const muzzle = scaledBox(0.11, 0.075, 0.1, black);
+    muzzle.position.set(0, 0.48, -0.56);
     group.add(neck, head, muzzle);
     for (const x of [-1, 1]) {
-      const ear = scaledBox(0.045, 0.16, 0.035, black);
-      ear.position.set(x * 0.14, 0.38, -0.44);
-      ear.rotation.z = x * 0.25;
-      const eye = scaledBox(0.032, 0.036, 0.02, pale);
-      eye.position.set(x * 0.06, 0.55, -0.54);
-      const pupil = scaledBox(0.016, 0.02, 0.012, black);
-      pupil.position.set(x * 0.065, 0.548, -0.552);
+      const ear = scaledBox(0.18, 0.05, 0.04, black);
+      ear.position.set(x * 0.2, 0.58, -0.4);
+      ear.rotation.z = x * 0.45;
+      const eye = scaledBox(0.042, 0.04, 0.02, pale);
+      eye.position.set(x * 0.06, 0.57, -0.54);
+      const pupil = scaledBox(0.02, 0.022, 0.012, black);
+      pupil.position.set(x * 0.064, 0.568, -0.552);
       group.add(ear, eye, pupil);
     }
     const tail = new THREE.Mesh(foliage, woolShade);
-    tail.scale.set(0.07, 0.07, 0.06);
-    tail.position.set(0, 0.52, 0.56);
+    tail.scale.set(0.07, 0.07, 0.05);
+    tail.position.set(0, 0.54, 0.36);
     group.add(tail);
-    for (const [x, z] of [[-0.14, -0.02], [0.14, -0.02], [-0.15, 0.28], [0.15, 0.28]]) {
-      const leg = scaledBox(0.055, 0.26, 0.055, black);
+    for (const [x, z] of [[-0.12, -0.06], [0.12, -0.06], [-0.13, 0.2], [0.13, 0.2]]) {
+      const leg = scaledBox(0.06, 0.3, 0.06, black);
       leg.position.set(x, 0.15, z);
-      const hoof = scaledBox(0.065, 0.04, 0.07, black);
-      hoof.position.set(x, 0.03, z);
-      group.add(leg, hoof);
+      group.add(leg);
     }
     return group;
   }
@@ -1305,6 +1393,7 @@ export function createProps(THREE, materials) {
     const pole = scaledBox(0.06, 1.15, 0.06, metal());
     pole.position.y = 1.35;
     group.add(top, leg, umbrella, pole);
+    bakeStatic(group);
     return group;
   }
 
@@ -1325,6 +1414,7 @@ export function createProps(THREE, materials) {
     createBusStop,
     createCafe,
     createPothole,
+    bake: bakeStatic,
     createSlick,
     createAnimal,
     createDog,

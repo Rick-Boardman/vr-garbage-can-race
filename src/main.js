@@ -66,6 +66,10 @@ let pending = { steer: 0, throttle: 0, jump: false, source: "keys" };
 let posed = null;
 let elapsed = 0;
 let hudTimer = 0;
+let lastFrameAt = 0;
+let frameSamples = 0;
+let frameTime = 0;
+let frameRate = 0;
 let persistedBest = ride.best;
 let latestTilt = null;
 let tiltNeutral = null;
@@ -284,14 +288,22 @@ function updateHud() {
   const district = districtAt(course, ride.s);
   const traveled = Math.max(0, ride.s - START_S);
   const best = Math.max(0, ride.best - START_S);
+  if (frameTime > 0) {
+    frameRate = frameSamples / frameTime;
+    frameSamples = 0;
+    frameTime = 0;
+  }
   const lines = [
     `${Math.round(ride.speed * 3.6)} km/h`,
+  ];
+  if (frameRate > 0) lines.push(`${Math.round(frameRate)} fps`);
+  lines.push(
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
     `${district.name} · ${district.time}`,
     `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}`,
     view.name,
     `seed ${course.seed} · ${pending.source}`,
-  ];
+  );
   if (ride.eject) {
     lines.unshift("A/D strafe. Q/E turn. W walks. Space jumps.");
     lines.unshift("Get back in the can");
@@ -473,7 +485,20 @@ function newHill(nextSeed) {
   updateHud();
 }
 
+function noteFrame() {
+  const now = performance.now();
+  if (lastFrameAt > 0) {
+    const dt = (now - lastFrameAt) / 1000;
+    if (dt > 0 && dt < 2) {
+      frameSamples += 1;
+      frameTime += dt;
+    }
+  }
+  lastFrameAt = now;
+}
+
 function tick({ dt }) {
+  noteFrame();
   const step = Math.min(Math.max(dt || 0, 0), 0.05);
   elapsed += step;
   const presenting = !!renderer.xr?.isPresenting;

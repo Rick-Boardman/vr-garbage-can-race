@@ -807,6 +807,7 @@ export function createTown(THREE, scene, materials, props) {
       const sample = sampleCourse(course, s);
       const offset = (rand() - 0.5) * sample.halfWidth * 0.85;
       const hole = props.createPothole(rand);
+      props.bake(hole);
       place(root, hole, sample, offset, 0, sample);
       circleHazard(nextId("pothole"), "pothole", sample, offset, 0.95);
     }
@@ -963,6 +964,7 @@ export function createTown(THREE, scene, materials, props) {
         const offset = pastureOffset(sample, radius);
         if (offset == null) continue;
         const animal = props.createAnimal(rand, animalKind);
+        props.bake(animal);
         const dir = rand() > 0.5 ? 1 : -1;
         place(root, animal, sample, offset, 0, upright(sample, dir));
         actors.push({
@@ -996,6 +998,12 @@ export function createTown(THREE, scene, materials, props) {
       benches.push({ s: at.s, side, offset: sidewalk });
       addBlock(at, sidewalk, 0.95);
     }
+
+    // People, animals, and cones keep moving. Everything else in the chunk
+    // shares a material with its neighbors, so fold those into a few meshes.
+    for (const actor of actors) actor.group.userData.keep = true;
+    props.bake(root);
+    for (const actor of actors) delete actor.group.userData.keep;
 
     scene.add(root);
     return { index, s0, s1, root, actors, staticHazards, benches, solids };
