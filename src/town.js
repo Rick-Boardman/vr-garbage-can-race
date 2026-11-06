@@ -969,6 +969,7 @@ export function createTown(THREE, scene, materials, props) {
           id: nextId(animalKind),
           group: animal,
           kind: "animal",
+          species: animalKind,
           pose: "walk",
           s: sample.s,
           offset,
@@ -1219,6 +1220,13 @@ export function createTown(THREE, scene, materials, props) {
     slot.style = fields.style ?? null;
     slot.speed = fields.speed ?? null;
     slot.wreck = fields.wreck ?? null;
+    slot.call = fields.call ?? null;
+  }
+
+  function actorVoice(actor) {
+    if (actor.kind === "animal" && actor.species === "cow") return "moo";
+    if (actor.group?.userData?.dog) return "bark";
+    return null;
   }
 
   function releaseActor(actor) {
@@ -1844,6 +1852,7 @@ export function createTown(THREE, scene, materials, props) {
           radius: actor.radius || (actor.kind === "animal" ? 0.6 : 0.42),
           s: actor.s,
           offset: actor.offset,
+          call: actorVoice(actor),
         });
       }
     }

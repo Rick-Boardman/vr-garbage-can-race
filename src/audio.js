@@ -19,6 +19,8 @@ const CLIPS = {
   skid: "audio/skid.ogg",
   thud: "audio/thud.ogg",
   whoosh: "audio/whoosh.ogg",
+  bark: "audio/bark.ogg",
+  moo: "audio/moo.ogg",
 };
 
 const LOOPS = ["soundtrack", "roll", "wind", "traffic", "chatter", "siren"];
@@ -61,10 +63,32 @@ export function freshCueMemory(frame) {
     brakeCool: 0,
     whooshCool: 0,
     skidCool: 0,
+    barkCool: 0,
+    mooCool: 0,
+    calls: {},
     duck: 0,
     gaps: {},
     wrecks: {},
   };
+}
+
+const CALL_REACH = { bark: 16, moo: 26 };
+
+function hashUnit(text) {
+  let hash = 2166136261;
+  const value = String(text);
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
+// The first call waits, so walking into earshot does not bark on that frame.
+// Later calls from the same animal are farther apart. The hash keeps tests stable.
+function callDelay(id, again) {
+  const unit = hashUnit(`${id}:${again ? "again" : "first"}`);
+  return again ? 7 + unit * 7 : 1.5 + unit * 4.5;
 }
 
 // Pure mix. Mutates memory so the next frame can hear what changed.
@@ -75,7 +99,10 @@ export function planCues(memory, frame) {
   memory.brakeCool = Math.max(0, memory.brakeCool - dt);
   memory.whooshCool = Math.max(0, memory.whooshCool - dt);
   memory.skidCool = Math.max(0, memory.skidCool - dt);
+  memory.barkCool = Math.max(0, (memory.barkCool || 0) - dt);
+  memory.mooCool = Math.max(0, (memory.mooCool || 0) - dt);
   memory.duck = Math.max(0, memory.duck - dt);
+  if (!memory.calls) memory.calls = {};
 
   const ride = frame.ride;
   const rider = riderOf(ride);
@@ -140,11 +167,25 @@ export function planCues(memory, frame) {
   let traffic = 0;
   let siren = 0;
   const seen = new Set();
+  const nearCalls = new Set();
+  const voices = [];
   for (const hazard of frame.hazards || []) {
     if (!hazard || hazard.s == null) continue;
     const distance = Math.hypot(hazard.s - rider.s, (hazard.offset || 0) - rider.offset);
     if (hazard.kind === "person" && distance < 28) {
       chatter = Math.max(chatter, (1 - distance / 28) * 0.28);
+    }
+    const call = hazard.call === "bark" || hazard.call === "moo" ? hazard.call : "";
+    if (call && hazard.id && distance < CALL_REACH[call]) {
+      nearCalls.add(hazard.id);
+      const wait = memory.calls[hazard.id];
+      if (wait == null) {
+        memory.calls[hazard.id] = callDelay(hazard.id, false);
+      } else {
+        const left = wait - dt;
+        memory.calls[hazard.id] = left;
+        if (left <= 0) voices.push({ id: hazard.id, name: call, distance });
+      }
     }
     if (hazard.kind !== "car") continue;
     const speed = Math.abs(hazard.speed || 0);
@@ -180,6 +221,24 @@ export function planCues(memory, frame) {
     for (const id of Object.keys(memory.gaps)) {
       if (!seen.has(id)) delete memory.gaps[id];
     }
+  }
+  for (const id of Object.keys(memory.calls)) {
+    if (!nearCalls.has(id)) delete memory.calls[id];
+  }
+  for (const name of ["bark", "moo"]) {
+    const coolKey = name === "bark" ? "barkCool" : "mooCool";
+    if (memory[coolKey] > 0) continue;
+    let best = null;
+    for (const voice of voices) {
+      if (voice.name !== name) continue;
+      if (!best || voice.distance < best.distance) best = voice;
+    }
+    if (!best) continue;
+    const closeness = 1 - best.distance / CALL_REACH[name];
+    const base = name === "bark" ? 0.44 : 0.5;
+    ones.push({ name, gain: base * (0.62 + 0.38 * closeness) });
+    memory.calls[best.id] = callDelay(best.id, true);
+    memory[coolKey] = 2.8;
   }
 
   const canDistance = Math.hypot(rider.canS - rider.s, rider.canOffset - rider.offset);
