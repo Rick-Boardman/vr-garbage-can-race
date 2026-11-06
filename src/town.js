@@ -412,6 +412,59 @@ export function personHitByCar(actor, cars) {
   return null;
 }
 
+function carCovers(actor, cars) {
+  if (!cars) return false;
+  for (const car of cars) {
+    const along = Math.abs((actor.s || 0) - car.s) < (car.halfL || 2.15) + 0.35;
+    const across = Math.abs((actor.offset || 0) - car.offset) < (car.halfW || 0.95) + 0.4;
+    if (along && across) return true;
+  }
+  return false;
+}
+
+function standUp(actor) {
+  let pose = actor.was || "walk";
+  if (pose === "sit" || pose === "fallen" || pose === "bounce") pose = "walk";
+  actor.pose = pose;
+  actor.tumble = 0;
+  actor.roll = 0;
+  actor.lie = null;
+  actor.hop = 0;
+  actor.vy = 0;
+  actor.vs = 0;
+  actor.vo = 0;
+  actor.down = null;
+  actor.flop = null;
+  // A fresh touch right as they stand would drop them again.
+  actor.grace = 1.25;
+  if (actor.group?.userData) {
+    actor.group.userData.flop = null;
+    actor.group.userData.pose = pose === "cross" ? "walk" : pose;
+  }
+}
+
+// A person who was knocked down stays there, then rolls upright and walks.
+// Animals and cones stay down. A car parked on them holds the timer.
+export function stepFallen(actor, dt, cars) {
+  const step = Math.max(0, Math.min(dt || 0, 0.05));
+  if (actor.flop) stepFlop(actor.flop, step, true);
+  if (actor.kind === "person") {
+    if (actor.down == null) actor.down = 2.8 + Math.min(1, actor.force || 0.4) * 2;
+    const covered = carCovers(actor, cars);
+    if (!covered) actor.down -= step;
+    if (actor.down <= 0 && !covered) actor.lie = 0;
+    else if (covered && (actor.lie == null || actor.lie === 0)) {
+      actor.lie = Math.sign(actor.tumble || 1) * (Math.PI / 2);
+    }
+  }
+  if (actor.lie != null) {
+    actor.tumble = (actor.tumble || 0) + (actor.lie - (actor.tumble || 0)) * Math.min(1, step * 5);
+    actor.roll = (actor.roll || 0) * Math.exp(-4 * step);
+  }
+  const upright = Math.abs(actor.tumble || 0) < 0.08 && Math.abs(actor.roll || 0) < 0.08;
+  if (actor.kind === "person" && actor.lie === 0 && upright && !carCovers(actor, cars)) standUp(actor);
+}
+
 export function strikeResponse(actor, car) {
   if (!actor || actor.fixed) return null;
   if (!personHitByCar(actor, [car])) return null;
@@ -1219,14 +1272,10 @@ export function createTown(THREE, scene, materials, props) {
     if (actor.group.userData?.limbs) animatePerson(actor.group, time);
   }
 
-  function stepBounce(actor, step) {
+  function stepBounce(actor, step, cars) {
     const dt = Math.max(0, Math.min(step, 0.05));
     if (actor.pose === "fallen") {
-      if (actor.flop) stepFlop(actor.flop, dt, true);
-      if (actor.lie != null) {
-        actor.tumble = (actor.tumble || 0) + (actor.lie - (actor.tumble || 0)) * Math.min(1, dt * 5);
-        actor.roll = (actor.roll || 0) * Math.exp(-4 * dt);
-      }
+      stepFallen(actor, dt, cars);
       return;
     }
     actor.vs = (actor.vs || 0) * Math.exp(-0.7 * dt);
@@ -1257,9 +1306,12 @@ export function createTown(THREE, scene, materials, props) {
     actor.vo = 0;
     actor.pose = "fallen";
     actor.lie = Math.sign(actor.tumble || actor.spinRate || 1) * (Math.PI / 2);
+    if (actor.kind === "person") actor.down = 2.8 + Math.min(1, actor.force || 0.4) * 2;
   }
 
   function beginFlight(actor, kick) {
+    if (actor.pose !== "bounce" && actor.pose !== "fallen") actor.was = actor.pose;
+    actor.down = null;
     releaseActor(actor);
     const force = kick.force ?? 1;
     actor.pose = "bounce";
@@ -1356,6 +1408,7 @@ export function createTown(THREE, scene, materials, props) {
       if (!actor) continue;
       if (event.type === "fell") {
         if (actor.pose === "fallen" || actor.pose === "bounce") continue;
+        if ((actor.grace || 0) > 0) continue;
         const side = event.side || (actor.offset >= 0 ? 1 : -1);
         beginFlight(actor, launchVelocity(actor.kind, {
           along: event.along || 1,
@@ -1672,7 +1725,7 @@ export function createTown(THREE, scene, materials, props) {
       for (const actor of chunk.actors) {
         if (actor.kind === "cone") {
           actor.cool = Math.max(0, (actor.cool || 0) - dt);
-          if (actor.pose === "bounce" || (actor.pose === "fallen" && actor.lie != null)) stepBounce(actor, dt);
+          if (actor.pose === "bounce" || (actor.pose === "fallen" && actor.lie != null)) stepBounce(actor, dt, carBlocks);
           if (actor.pose !== "bounce" && actor.cool <= 0) {
             const car = coneTouch(actor, carBlocks);
             if (car) {
@@ -1689,7 +1742,8 @@ export function createTown(THREE, scene, materials, props) {
           syncCone(actor);
           continue;
         }
-        if (actor.pose === "bounce" || (actor.pose === "fallen" && actor.lie != null)) stepBounce(actor, dt);
+        if ((actor.grace || 0) > 0) actor.grace = Math.max(0, actor.grace - dt);
+        if (actor.pose === "bounce" || (actor.pose === "fallen" && actor.lie != null)) stepBounce(actor, dt, carBlocks);
         const blocks = around(actor);
         if (actor.pose === "walk") {
           const dir = actor.dir || 1;

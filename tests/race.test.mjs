@@ -41,6 +41,7 @@ import {
   vehicleBodiesOverlap,
   vehicleClearance,
   separateCircle,
+  stepFallen,
   TRAFFIC_FLEET,
   vehicleHitsLife,
   vehicleMayHit,
@@ -1287,6 +1288,65 @@ test("the can has a solid bottom", () => {
   assert.ok(ray.intersectObject(floor, false).length > 0, "open from below");
   ray.set(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0));
   assert.ok(ray.intersectObject(floor, false).length > 0, "open from inside");
+});
+
+test("a person who was walked into gets back up", () => {
+  const person = {
+    kind: "person",
+    pose: "fallen",
+    was: "walk",
+    force: 0.4,
+    tumble: Math.PI / 2,
+    roll: 0.2,
+    lie: Math.PI / 2,
+    down: 0.05,
+    group: { userData: { pose: "fallen" } },
+  };
+  stepFallen(person, 0.05, []);
+  assert.equal(person.pose, "fallen");
+  assert.equal(person.lie, 0);
+  for (let step = 0; step < 40 && person.pose === "fallen"; step += 1) stepFallen(person, 0.05, []);
+  assert.equal(person.pose, "walk");
+  assert.equal(person.tumble, 0);
+  assert.equal(person.flop, null);
+  assert.ok(person.grace > 1, `grace ${person.grace}`);
+
+  const sitter = {
+    kind: "person",
+    pose: "fallen",
+    was: "sit",
+    force: 0.3,
+    tumble: 0.02,
+    roll: 0,
+    lie: 0,
+    down: 0,
+    group: { userData: { pose: "ragdoll", flop: {} } },
+  };
+  stepFallen(sitter, 0.05, []);
+  assert.equal(sitter.pose, "walk");
+  assert.equal(sitter.group.userData.pose, "walk");
+  assert.equal(sitter.group.userData.flop, null);
+
+  const cow = { kind: "animal", pose: "fallen", tumble: 1.2, roll: 0, lie: Math.PI / 2 };
+  for (let step = 0; step < 80; step += 1) stepFallen(cow, 0.05, []);
+  assert.equal(cow.pose, "fallen");
+
+  const under = {
+    kind: "person",
+    pose: "fallen",
+    was: "talk",
+    s: 10,
+    offset: 1,
+    force: 0.4,
+    tumble: Math.PI / 2,
+    roll: 0,
+    lie: Math.PI / 2,
+    down: 0,
+  };
+  const car = { s: 10, offset: 1, halfL: 2.2, halfW: 1, speed: 6 };
+  for (let step = 0; step < 40; step += 1) stepFallen(under, 0.05, [car]);
+  assert.equal(under.pose, "fallen");
+  assert.ok(Math.abs(under.lie) > 1, `stood under the car ${under.lie}`);
 });
 
 test("a thrown person flops and a truck has a cab, bed, and grille", () => {
