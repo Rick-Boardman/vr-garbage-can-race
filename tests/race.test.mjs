@@ -33,7 +33,9 @@ import {
   personHitByCar,
   recoverCruise,
   animalRoamTarget,
+  clampBusBias,
   collideSweptCars,
+  releaseBus,
   roadPathOpen,
   separateLane,
   signFrame,
@@ -126,6 +128,8 @@ test("hands, tilt, and keys steer with the documented signs", () => {
   assert.equal(inputFromKeys({ keys: new Set(["W"]) }).throttle, 1);
   assert.equal(inputFromKeys({ keys: new Set(["S"]) }).throttle, -1);
   assert.equal(inputFromKeys({ keys: new Set(["Shift"]) }).throttle, 1);
+  assert.equal(inputFromKeys({ keys: new Set(["X"]) }).throttle, 1);
+  assert.equal(inputFromKeys({ keys: new Set() }).throttle, 0);
   const look = inputFromLook(0.5, 0.38);
   assert.ok(look.steer < 0);
   assert.ok(look.throttle < 0);
@@ -1081,13 +1085,15 @@ test("potholes are broken pavement and the animals read as cows, sheep, and dogs
   assert.equal(snout, true);
 
   const sheep = props.createAnimal(() => 0.3, "sheep");
-  let wool = false;
+  let wool = 0;
   let face = false;
   sheep.traverse((object) => {
-    if (object.geometry?.type === "IcosahedronGeometry") wool = true;
-    if (object.geometry?.type === "SphereGeometry" && object.position.z < -0.4) face = true;
+    if (!object.isMesh) return;
+    const count = object.geometry.attributes?.position?.count || 0;
+    if (count > 80 && object.position.y > 0.4 && object.position.z > -0.2) wool += 1;
+    if (count > 80 && object.position.z < -0.4) face = true;
   });
-  assert.equal(wool, true);
+  assert.ok(wool >= 2, `wool puffs ${wool}`);
   assert.equal(face, true);
 
   const dog = props.createDog(() => 0.2);
@@ -1427,6 +1433,72 @@ test("vehicles sometimes hit people and sometimes each other", () => {
   assert.ok(intoCurb.wreck, "swerve passed through the parked car");
   assert.equal(intoCurb.wreck.shift, 2.2);
 
+  assert.equal(vehicleMayHit({ id: "traffic-0", kind: "bus" }, { id: "tail-0", kind: "car" }), false);
+  assert.equal(vehicleMayHit({ id: "traffic-0", kind: "car" }, { id: "tail-0", kind: "bus" }), false);
+  for (const halfWidth of [5.4, 5.6, 6.1, 6.4, 7.1, 7.8]) {
+    for (const side of [1, -1]) {
+      const lane = side * 0.36 * halfWidth;
+      for (const asked of [0, 2.4, -2.4]) {
+        const bias = clampBusBias(lane, asked, halfWidth);
+        const offset = lane + bias;
+        assert.equal(Math.sign(offset), side, `bus crossed at width ${halfWidth} bias ${asked} -> ${offset}`);
+        assert.ok(Math.abs(offset) > 0.4, `bus reached the crown at width ${halfWidth}`);
+        const truck = { s: 20, offset: side * (halfWidth - 1.4), halfL: 3.35, halfW: 1.15 };
+        const sedan = { s: 20, offset: side * (halfWidth - 1.2), halfL: 2.15, halfW: 0.95 };
+        const body = { s: 20, offset, halfL: 4.9, halfW: 1.28 };
+        assert.equal(vehicleBodiesOverlap(body, truck, 0.45), false, `truck width ${halfWidth}`);
+        assert.equal(vehicleBodiesOverlap(body, sedan, 0.45), false, `sedan width ${halfWidth}`);
+      }
+    }
+  }
+  const pulledOver = {
+    id: "traffic-1",
+    kind: "bus",
+    s: 40,
+    offset: 3.4,
+    laneOffset: 1.94,
+    lane: 0.36,
+    halfL: 4.9,
+    halfW: 1.28,
+    speed: 7,
+    bias: 1.46,
+  };
+  const stall = { s: 41, offset: 4.2, halfL: 2.15, halfW: 0.95, speed: 0 };
+  assert.equal(vehicleBodiesOverlap(pulledOver, stall, 0.45), true);
+  assert.equal(collideSweptCars([pulledOver], [stall]), 0);
+  assert.equal(pulledOver.wreck, undefined);
+  assert.equal(vehicleBodiesOverlap(pulledOver, stall, 0.45), false);
+  const meeting = {
+    id: "traffic-1",
+    kind: "bus",
+    s: 40,
+    offset: 0.4,
+    laneOffset: 1.94,
+    lane: 0.36,
+    halfL: 4.9,
+    halfW: 1.28,
+    speed: 6,
+    bias: -1.54,
+  };
+  const oncomingTruck = {
+    id: "traffic-2",
+    kind: "truck",
+    s: 41,
+    offset: -1.2,
+    laneOffset: -1.94,
+    lane: -0.36,
+    halfL: 3.35,
+    halfW: 1.15,
+    speed: -7,
+    bias: 0.74,
+  };
+  assert.equal(vehicleBodiesOverlap(meeting, oncomingTruck), true);
+  assert.equal(collideSweptCars([meeting, oncomingTruck], []), 0);
+  assert.equal(meeting.wreck, undefined);
+  assert.equal(oncomingTruck.wreck, undefined);
+  assert.equal(vehicleBodiesOverlap(meeting, oncomingTruck), false);
+  assert.equal(releaseBus(meeting, [oncomingTruck]), false);
+
   const cow = { homeOffset: 16, offset: 16 };
   const ontoRoad = animalRoamTarget(cow, { halfWidth: 5.6 }, 10, false);
   assert.ok(ontoRoad > 0.5 && ontoRoad < 5.6, `road spot ${ontoRoad}`);
@@ -1718,16 +1790,13 @@ test("a walker bends the forward knee and a tree is a cluster", () => {
   person.userData.limbs.handR.getWorldPosition(handAt);
   assert.ok(handAt.z < -0.12, `ride hand ${handAt.z}`);
 
-  let facets = 0;
-  person.traverse((object) => {
-    if (object.geometry?.type === "IcosahedronGeometry") facets += 1;
-  });
-  assert.ok(facets >= 2, `head facets ${facets}`);
+  const head = person.getObjectByName("person-head");
+  assert.ok(head.geometry.getAttribute("position").count > 200, "head is a modeled mesh");
 
   const tree = props.createTree(() => 0.4);
   let puffs = 0;
   tree.traverse((object) => {
-    if (object.geometry?.type === "IcosahedronGeometry") puffs += 1;
+    if (object.isMesh && object.geometry.getAttribute("position").count > 100) puffs += 1;
   });
   assert.ok(puffs >= 4, `tree puffs ${puffs}`);
 });

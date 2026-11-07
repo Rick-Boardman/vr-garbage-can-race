@@ -60,9 +60,25 @@ export const TRAFFIC_FLEET = ["plain", "bus", "truck", "plain", "cop"];
 
 // The follower is the car that would be held back. A few followers close
 // the gap. Most keep LANE_GAP, so piles of wrecks stay rare.
-export function vehicleMayHit(_lead, follow) {
+// A bus keeps the gap. Closing on one was rolling it over in ordinary traffic.
+export function vehicleMayHit(lead, follow) {
   if (!follow?.id) return false;
+  if (lead?.kind === "bus" || follow?.kind === "bus") return false;
   return hashPercent(`${follow.id}|rear`) < 14;
+}
+
+// Keep a bus on its own side of the road, short of the parking row.
+// laneOffset is the lane center. Check: halfWidth 5.4, laneOffset 1.944,
+// bias 2.4 stays positive and under 1.9, clear of a truck parked at 4.0.
+export function clampBusBias(laneOffset, bias, halfWidth) {
+  const sign = Math.sign(laneOffset) || 1;
+  const lane = Math.abs(laneOffset);
+  const width = Math.max(0, halfWidth || 0);
+  const maxAbs = Math.min(lane + 0.2, Math.max(0.4, width - 3.5));
+  const minAbs = Math.max(0, lane - 0.45);
+  let abs = Math.min(Math.abs(laneOffset + (bias || 0)), maxAbs);
+  abs = Math.max(abs, Math.min(minAbs, maxAbs));
+  return sign * abs - laneOffset;
 }
 
 export function vehicleClearance(height, halfW, tilt) {
@@ -171,11 +187,43 @@ export function vehicleBodiesOverlap(a, b, slack = 0) {
 }
 
 function beginOverlapWreck(car, other) {
-  if (!car || car.wreck) return false;
+  if (!car || car.wreck || car.kind === "bus" || other?.kind === "bus") return false;
   const bias = car.bias || 0;
   startVehicleWreck(car, other);
   if (car.wreck) car.wreck.shift = bias;
   return true;
+}
+
+// The bus body is long enough to count a curb stop, or a sedan passing the
+// other way, as a hit. Slide the lighter car aside, or the bus toward the
+// crown, and leave both upright.
+export function releaseBus(bus, others, { parkedSlack = 0.45 } = {}) {
+  if (!bus || bus.kind !== "bus" || bus.wreck) return false;
+  let moved = false;
+  for (const other of others || []) {
+    if (!other || other === bus) continue;
+    const parked = !other.kind;
+    const slack = parked ? parkedSlack : 0;
+    if (!vehicleBodiesOverlap(bus, other, slack)) continue;
+    moved = true;
+    if (!parked && !other.wreck) {
+      const away = Math.sign((other.offset || 0) - (bus.offset || 0))
+        || -(Math.sign(bus.offset || bus.lane || 1) || 1);
+      const reachW = (bus.halfW || 1.28) + (other.halfW || 0.95);
+      const need = reachW + 0.08 - Math.abs((other.offset || 0) - (bus.offset || 0));
+      if (need > 0) {
+        other.offset = (other.offset || 0) + away * need;
+        if (Number.isFinite(other.laneOffset)) other.bias = other.offset - other.laneOffset;
+      }
+    }
+    if (!vehicleBodiesOverlap(bus, other, slack)) continue;
+    const reachW = (bus.halfW || 1.28) + (other.halfW || 0.95) - slack;
+    const sign = Math.sign(bus.offset || bus.lane || 1) || 1;
+    const room = Math.abs(other.offset || 0) - reachW - 0.08;
+    bus.offset = sign * Math.max(0, Math.min(Math.abs(bus.offset || 0), Math.max(0, room)));
+    if (Number.isFinite(bus.laneOffset)) bus.bias = bus.offset - bus.laneOffset;
+  }
+  return moved;
 }
 
 // Same-lane gaps stay in separateLane. A swerve leaves that lane, and the
@@ -188,8 +236,16 @@ export function collideSweptCars(cars, obstacles = [], { parkedSlack = 0.45 } = 
       const other = cars[otherIndex];
       if (car.wreck?.settled && other.wreck?.settled) continue;
       if (!vehicleBodiesOverlap(car, other)) continue;
+      if (car.kind === "bus" || other.kind === "bus") {
+        releaseBus(car.kind === "bus" ? car : other, [car.kind === "bus" ? other : car]);
+        continue;
+      }
       if (beginOverlapWreck(car, other)) hits += 1;
       if (beginOverlapWreck(other, car)) hits += 1;
+    }
+    if (car.kind === "bus" && !car.wreck) {
+      releaseBus(car, obstacles, { parkedSlack });
+      continue;
     }
     if (car.wreck) continue;
     for (const block of obstacles) {
@@ -1603,7 +1659,8 @@ export function createTown(THREE, scene, materials, props) {
         car.dwell = pace.dwell;
         if (pace.arrive && bench) car.served = bench.s;
         // A short dwell ends before a rider coming downhill can see it.
-        // Hold the curb while that rider is closing in, then pull away.
+        // Hold the stop while that rider is closing in, then roll.
+        // The stop stays in the travel lane. The curb is where parked cars sit.
         const dir = (car.cruise ?? 1) >= 0 ? 1 : -1;
         const gap = player && Number.isFinite(player.s) ? (car.s - player.s) * dir : 999;
         const closing = player && Math.abs(player.speed || 0) > 4;
@@ -1613,8 +1670,7 @@ export function createTown(THREE, scene, materials, props) {
         } else if ((car.dwell || 0) <= 0) {
           car.hold = 0;
         }
-        if (bench && bench.ahead < 18) car.stopPull = Math.sign(car.lane || 1);
-        else if ((car.dwell || 0) <= 0) car.stopPull = 0;
+        car.stopPull = 0;
         car.s += car.speed * dt;
       } else {
         car.stopPull = 0;
@@ -1637,8 +1693,9 @@ export function createTown(THREE, scene, materials, props) {
     }
     separateLane(cars, { mayCrash: vehicleMayHit });
     for (const car of cars) {
-      if (!car.crash || car.wreck) continue;
+      if (!car.crash || car.wreck || car.kind === "bus") continue;
       const other = cars.find((item) => item.id === car.crash);
+      if (other?.kind === "bus") continue;
       startVehicleWreck(car, other);
     }
     const carBlocks = parkedBlocks.slice();
@@ -1691,12 +1748,16 @@ export function createTown(THREE, scene, materials, props) {
         const rate = (aim.swerving ? 4.5 : 2.8) * dt;
         car.bias = (car.bias || 0) + (aim.bias - (car.bias || 0)) * Math.min(1, rate);
       }
+      if (car.kind === "bus" && !car.wreck) {
+        car.bias = clampBusBias(laneOffset, car.bias, sample.halfWidth);
+      }
       const limit = Math.max(0.3, sample.halfWidth - 1.3);
       const offset = car.wreck
         ? clampOffset(laneOffset + (car.wreck.shift || 0), limit)
         : clampOffset(laneOffset + car.bias, limit);
       if (!car.wreck) car.bias = offset - laneOffset;
       car.offset = offset;
+      car.laneOffset = laneOffset;
       car.swerving = !!aim.swerving;
       car.striking = striking;
     }
