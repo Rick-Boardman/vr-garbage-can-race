@@ -298,6 +298,14 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
     eject.bodySpin = 0;
     eject.bodyRoll = 0;
   }
+  // Upright, on the ground, and not asking to move: plant the feet.
+  // The leftover slide from a hop was still above the walk threshold, so the
+  // legs kept stepping after every key was up and autowalk was off.
+  const stepping = Math.abs(throttle) > 0.08 || Math.abs(strafe || 0) > 0.08;
+  if (!stepping && grounded && eject.bodySpin === 0 && eject.bodyRoll === 0) {
+    eject.bodyAlong = 0;
+    eject.bodyLat = 0;
+  }
   if (jump && grounded && eject.bodySpin === 0 && eject.bodyRoll === 0) {
     eject.bodyVy = 6.4;
     eject.bodyHop = 0.08;
@@ -436,6 +444,9 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
   accel -= brake * (5.5 + speed * 0.7);
   if (onShoulder) accel -= 2.4 + speed * 0.4;
   speed = clamp(speed + accel * step, 0, 24);
+  // Gravity would roll a stopped can the moment the brake is released.
+  // Stay stopped until a tuck or autowalk (throttle > 0) asks to go.
+  if (throttle <= 0 && state.speed <= 0.45 && speed <= 0.45) speed = 0;
 
   if (!state.onShoulder && onShoulder) {
     speed *= 0.9;

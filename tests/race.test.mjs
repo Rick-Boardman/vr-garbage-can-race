@@ -128,8 +128,72 @@ test("hands, tilt, and keys steer with the documented signs", () => {
   assert.equal(inputFromKeys({ keys: new Set(["W"]) }).throttle, 1);
   assert.equal(inputFromKeys({ keys: new Set(["S"]) }).throttle, -1);
   assert.equal(inputFromKeys({ keys: new Set(["Shift"]) }).throttle, 1);
-  assert.equal(inputFromKeys({ keys: new Set(["X"]) }).throttle, 1);
-  assert.equal(inputFromKeys({ keys: new Set() }).throttle, 0);
+  assert.equal(inputFromKeys({ keys: new Set(["X"]) }).throttle, 0);
+  assert.equal(inputFromKeys({ keys: new Set(), autoWalk: true }).throttle, 1);
+  assert.equal(inputFromKeys({ keys: new Set(), autoWalk: false }).throttle, 0);
+});
+
+test("a stop stays stopped until throttle asks to go", () => {
+  const course = createCourse(7);
+  const at = sampleCourse(course, 80);
+  const hill = { ...at, slope: 0.25 };
+  const parked = createRideState(80);
+  parked.speed = 0;
+  stepRide(parked, { dt: 0.05, steer: 0, throttle: 0, sample: hill, hazards: [] });
+  assert.equal(parked.speed, 0);
+  stepRide(parked, { dt: 0.05, steer: 0, throttle: 1, sample: hill, hazards: [] });
+  assert.ok(parked.speed > 0.2, `tuck from a stop ${parked.speed}`);
+
+  const rolling = createRideState(80);
+  const before = rolling.speed;
+  stepRide(rolling, { dt: 0.05, steer: 0, throttle: 0, sample: hill, hazards: [] });
+  assert.ok(rolling.speed > before - 0.5, `a rolling can was parked at ${rolling.speed}`);
+
+  const onFoot = createRideState(80);
+  onFoot.speed = 12;
+  stepRide(onFoot, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    sample: at,
+    hazards: [{ id: "truck", kind: "car", x: at.x, z: at.z, radius: 3 }],
+  });
+  assert.ok(onFoot.eject);
+  onFoot.eject.bodyHop = 0;
+  onFoot.eject.bodyVy = 0;
+  onFoot.eject.bodySpin = 0;
+  onFoot.eject.bodyRoll = 0;
+  onFoot.eject.bodyAlong = 0.8;
+  onFoot.eject.bodyLat = 0.4;
+  onFoot.eject.canS = onFoot.eject.bodyS + 30;
+  const stoodAt = onFoot.eject.bodyS;
+  stepRide(onFoot, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    strafe: 0,
+    sample: sampleCourse(course, onFoot.s),
+    hazards: [],
+  });
+  assert.equal(onFoot.eject.bodyAlong, 0);
+  assert.equal(onFoot.eject.bodyLat, 0);
+  const planted = onFoot.eject.bodyS;
+  stepRide(onFoot, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    sample: sampleCourse(course, onFoot.s),
+    hazards: [],
+  });
+  assert.equal(onFoot.eject.bodyS, planted, `slid from ${stoodAt} to ${onFoot.eject.bodyS}`);
+  stepRide(onFoot, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 1,
+    sample: sampleCourse(course, onFoot.s),
+    hazards: [],
+  });
+  assert.notEqual(onFoot.eject.bodyS, planted);
   const look = inputFromLook(0.5, 0.38);
   assert.ok(look.steer < 0);
   assert.ok(look.throttle < 0);

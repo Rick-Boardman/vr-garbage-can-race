@@ -13,6 +13,7 @@ import {
   holdAtLine,
   playBase,
   poseOf,
+  wantsSolo,
   separatePack,
   slotIndex,
   stickCommand,
@@ -237,6 +238,26 @@ window.addEventListener("pointerdown", (event) => {
   enableTilt(false);
 });
 
+function releaseHeldKey(event) {
+  const keys = navigation?.keysDown;
+  if (!keys) return;
+  const raw = event?.key;
+  const upper = typeof raw === "string" && raw.length === 1 ? raw.toUpperCase() : String(raw || "");
+  if (upper) keys.delete(upper);
+  if (event?.code === "ShiftLeft" || event?.code === "ShiftRight" || upper === "Shift") keys.delete("Shift");
+  if (typeof event?.code === "string" && event.code.startsWith("Key") && event.code.length === 4) {
+    keys.delete(event.code.slice(3).toUpperCase());
+  }
+}
+
+// Halo ignores keyup while chat is focused, so a W released there stays down
+// and you keep walking after you leave the field. Blur drops the same stuck set.
+// Autowalk is a toggle, so it is left alone.
+window.addEventListener("keyup", releaseHeldKey);
+window.addEventListener("blur", () => {
+  navigation?.keysDown?.clear();
+});
+
 window.addEventListener("keydown", (event) => {
   if (event.repeat) return;
   if (chatFocused() || typingInDom()) return;
@@ -325,8 +346,8 @@ hudSystem = boot.hudSystem;
 player = boot.rig.player;
 
 hudSystem.setHelpOverrideLines([
-  "A / D steer. W, Shift, or X tuck. S brakes. Space hops out.",
-  "On foot, A/D strafe. Q/E turn. W walks the way you face. Space jumps.",
+  "A / D steer. W or Shift tucks. X toggles autowalk. S brakes. Space hops out.",
+  "On foot, A/D strafe. Q/E turn. W walks the way you face. X keeps walking. Space jumps.",
   "Drag looks around while riding. On foot, drag a finger to walk and turn.",
   "V or 1 2 3 changes the camera. N starts a new hill. Host or Join waits at the start line.",
   "VR: lower the left controller to steer left, the right to steer right.",
@@ -544,6 +565,7 @@ function sampleInput(presenting) {
     : null;
   const keys = inputFromKeys({
     keys: navigation.keysDown,
+    autoWalk: navigation.autoWalk,
     lookSteer,
   });
   if (ride.eject) {
@@ -1366,6 +1388,7 @@ partyClient.onLobby((event) => {
   }
 });
 lobby.bindChat(partyClient.lobbyTransport());
+if (wantsSolo(window.location.search)) rideAlone();
 void bootLobby();
 window.addEventListener("pagehide", () => {
   partyClient.leaveLobbyKeepalive();

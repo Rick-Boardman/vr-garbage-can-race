@@ -16,6 +16,7 @@ import {
   slotIndex,
   stickCommand,
   takeJump,
+  wantsSolo,
 } from "../src/party.js";
 import { animatePerson, createProps } from "../src/props.js";
 import { createRemoteRiders } from "../src/remotes.js";
@@ -31,6 +32,17 @@ test("the countdown is one shared clock and the hold stays on the line", () => {
   assert.equal(ride.speed, 0);
   assert.equal(ride.offset, 1.25);
   assert.equal(ride.spin, 0.4);
+});
+
+test("solo=1 starts a ride and the plain address stays in the lobby", () => {
+  assert.equal(wantsSolo(""), false);
+  assert.equal(wantsSolo("?play=http://127.0.0.1:4339"), false);
+  assert.equal(wantsSolo("?solo=1"), true);
+  assert.equal(wantsSolo("solo=true"), true);
+  assert.equal(wantsSolo("?solo"), true);
+  assert.equal(wantsSolo("?solo=0"), false);
+  assert.equal(wantsSolo("?solo=no"), false);
+  assert.equal(wantsSolo("?seed=4&solo=yes"), true);
 });
 
 test("a phone cannot host and a headset can", () => {

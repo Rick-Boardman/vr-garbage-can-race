@@ -1,7 +1,7 @@
 // Ride input is steer (-1 left .. +1 right) and throttle (-1 brake .. +1 tuck).
-// Desktop keys are Halo's set: A/D steer, W/Shift/X tuck, S brake.
-// X is held. Halo also toggles an autowalk latch on X, and feeding that
-// latch in here keeps you walking after every key is up.
+// Desktop keys are Halo's set: A/D steer, W/Shift tuck, S brake.
+// X toggles Halo's autowalk. That latch is forward. With it off, and with
+// no move key down, throttle stays 0 so a stop stays a stop.
 // VR: the lower hand steers that way. Both hands below the head speed up;
 // both raised lean back and slow down.
 // Phone tilt: gamma/beta, remapped when the screen is landscape.
@@ -29,13 +29,13 @@ export function onFootJump(keys) {
   return down(" ") || down("Space");
 }
 
-export function inputFromKeys({ keys, lookSteer = null }) {
+export function inputFromKeys({ keys, autoWalk = false, lookSteer = null }) {
   const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
   let steer = 0;
   if (down("A")) steer -= 1;
   if (down("D")) steer += 1;
   let throttle = 0;
-  if (down("W") || down("Shift") || down("X")) throttle += 1;
+  if (down("W") || down("Shift") || autoWalk) throttle += 1;
   if (down("S")) throttle -= 1;
   if (lookSteer) {
     if (steer === 0) steer = lookSteer.steer;

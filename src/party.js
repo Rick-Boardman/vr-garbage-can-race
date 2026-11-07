@@ -26,6 +26,16 @@ export function playBase(search = "") {
   return String(raw).replace(/\/$/, "");
 }
 
+// The homepage Solo Play button opens the hill already rolling. The plain
+// address, and an explicit solo=0, stay on the lobby for Multiplayer.
+export function wantsSolo(search = "") {
+  const text = String(search || "");
+  const params = new URLSearchParams(text.startsWith("?") ? text.slice(1) : text);
+  if (!params.has("solo")) return false;
+  const value = String(params.get("solo") || "").trim().toLowerCase();
+  return value === "" || value === "1" || value === "true" || value === "yes";
+}
+
 export function canHostDevice({ userAgent = "", screenMin = 1000, touchPoints = 0, headset = false } = {}) {
   const ua = String(userAgent || "");
   if (headset || /OculusBrowser|\bQuest\b/i.test(ua)) return true;
