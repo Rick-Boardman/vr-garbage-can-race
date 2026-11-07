@@ -37,8 +37,33 @@ function localPath(urlPath) {
   return full;
 }
 
+// The local play API (Magna features/play/bff/local_server.py). Forwarding /api/play/ to it keeps the game and its
+// rooms on one origin, so plain http://127.0.0.1:8090 can host and join without ?play=.
+const playPort = Number(process.env.PLAY_API_PORT || 4339);
+
+function forwardPlay(request, response) {
+  const upstream = http.request(
+    { host: "127.0.0.1", port: playPort, path: request.url, method: request.method,
+      headers: { ...request.headers, host: `127.0.0.1:${playPort}` } },
+    (answer) => {
+      response.writeHead(answer.statusCode || 502, answer.headers);
+      answer.pipe(response);
+    },
+  );
+  upstream.on("error", () => {
+    if (response.headersSent) return response.end();
+    response.writeHead(502, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ code: "play_unreachable", message: `The play server on port ${playPort} is not running.` }));
+  });
+  request.pipe(upstream);
+}
+
 const server = http.createServer((request, response) => {
   const url = new URL(request.url || "/", "http://127.0.0.1");
+  if (url.pathname.startsWith("/api/play/")) {
+    forwardPlay(request, response);
+    return;
+  }
   const target = localPath(url.pathname);
   if (!target) {
     response.writeHead(400);
