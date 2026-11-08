@@ -17,7 +17,10 @@ export function createRemoteRiders(THREE, scene, materials, props) {
     const key = chosen ? lookKey(chosen) : `slot:${slot % SLOT_LOOKS.length}`;
     const existing = riders.get(slot);
     if (existing?.lookKey === key) return existing;
-    if (existing) existing.root.removeFromParent();
+    if (existing) {
+      existing.dispose?.();
+      existing.root.removeFromParent();
+    }
     const rider = createRider(THREE, materials, props, look);
     rider.lookKey = key;
     rider.root.name = `rider-slot-${slot}`;
@@ -55,6 +58,7 @@ export function createRemoteRiders(THREE, scene, materials, props) {
       }
       rider.root.visible = true;
       const pose = lerpPose(entry.from, entry.to, (now - entry.at) / BLEND_MS);
+      rider.setName(pose.displayName);
       placeRider(rider, course, pose, elapsed);
     }
   }
@@ -65,7 +69,18 @@ export function createRemoteRiders(THREE, scene, materials, props) {
     shown.clear();
   }
 
-  return { show, retain, place, clear };
+  // The pose on screen this instant. A guest collides with this, which is
+  // the same lerp place() draws. slot is the map key, not a field on the pose.
+  function poses(now) {
+    const list = [];
+    for (const [slot, entry] of shown) {
+      const t = (now - entry.at) / BLEND_MS;
+      list.push({ ...lerpPose(entry.from, entry.to, t), slot });
+    }
+    return list;
+  }
+
+  return { show, retain, place, clear, poses };
 }
 
 function placeRider(rider, course, pose, elapsed) {

@@ -1,6 +1,7 @@
 import { CAN_SHELLS } from "./can-geometry.js";
 import { applyFrame } from "./frame.js";
-import { COMPLEXIONS, HAIR_COLORS, SKIN_COLORS, mixHex } from "./looks.js";
+import { COMPLEXIONS, HAIR_COLORS, SKIN_COLORS, cleanName, mixHex } from "./looks.js";
+import { createNameTag } from "./name-tag.js";
 import { animatePerson, onFootPose } from "./props.js";
 
 // The shell is built with its origin on the road. Spinning that origin
@@ -59,7 +60,11 @@ export function createRider(THREE, materials, props, look = null) {
   shadow.scale.setScalar(canScale);
 
   const logoMount = addLogo(THREE, materials, look);
-  root.add(can, person, shadow);
+  const nameTag = createNameTag(THREE);
+  const nameBox = new THREE.Box3();
+  const nameAnchor = new THREE.Vector3();
+  let nameText = "";
+  root.add(can, person, shadow, nameTag.object);
   if (logoMount) {
     // Same scale as the shell, without inheriting its roll.
     logoMount.scale.copy(can.scale);
@@ -99,6 +104,7 @@ export function createRider(THREE, materials, props, look = null) {
     person.userData.pose = "ride";
     person.visible = showPerson;
     shadow.position.set(0, 0.04, 0);
+    parkName(showPerson);
   }
 
   function placeApart({
@@ -160,13 +166,43 @@ export function createRider(THREE, materials, props, look = null) {
     person.userData.pose = onFootPose({ tumbling, moving });
     person.visible = showPerson;
     shadow.position.set(person.position.x, bodySample.y + 0.04, person.position.z);
+    parkName(showPerson);
+  }
+
+  function setName(value) {
+    nameText = cleanName(value);
+  }
+
+  // World up, from the crown. The body's course frame can tilt on a grade,
+  // and a tumble tips the head, so the label is not parented to that rotation.
+  function parkName(show) {
+    const text = nameTag.setText(nameText);
+    const sprite = nameTag.object;
+    sprite.visible = !!(show && text);
+    if (!sprite.visible) return;
+    const head = person.getObjectByName("person-head");
+    const crown = head?.parent || person;
+    root.updateWorldMatrix(true, true);
+    nameBox.setFromObject(crown);
+    if (nameBox.isEmpty()) return;
+    nameAnchor.set(
+      (nameBox.min.x + nameBox.max.x) / 2,
+      nameBox.max.y + 0.06,
+      (nameBox.min.z + nameBox.max.z) / 2,
+    );
+    root.worldToLocal(sprite.position.copy(nameAnchor));
   }
 
   function animate(time) {
     animatePerson(person, time);
+    parkName(person.visible);
   }
 
-  return { root, place, placeApart, animate, person };
+  function dispose() {
+    nameTag.dispose();
+  }
+
+  return { root, place, placeApart, animate, person, setName, dispose };
 }
 
 function listedHex(list, key, value) {

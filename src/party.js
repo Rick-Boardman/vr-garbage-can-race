@@ -1,6 +1,7 @@
 // A party on one hill. The browser never names a topic. Sticks go up,
 // poses come down, and solo play does not open either channel.
 
+import { FOOT_RADIUS } from "./constants.js";
 import { cleanName, nameBlock } from "./looks.js";
 
 export const GAME = "garbage-can-race";
@@ -17,6 +18,11 @@ export const SLOT_LOOKS = [
 ];
 
 const REACH = 1.15;
+const PACK_RADIUS = REACH / 2;
+// Start lanes are 1.2 m apart, just outside the 1.15 m contact, so a
+// straight segment misses the rider beside you. The other fork is
+// several meters away and must still be a legal pass.
+const ORDER_LANE = REACH + 0.75;
 
 export function playBase(search = "") {
   const text = String(search || "");
@@ -99,31 +105,268 @@ export function easePose(local, remote, step) {
 }
 
 // Push overlapping riders apart along the course (s, offset). This is not
-// a camera frame: no lookAt, no yaw, no sin/cos.
+// a camera frame: no lookAt, no yaw, no sin/cos. A frozen body (movable
+// false) stays put and the other rider takes the whole shove. Two bodies
+// with the same owner, a person and their own loose can, do not shove.
 export function separatePack(riders) {
   const list = riders || [];
   for (let pass = 0; pass < 4; pass += 1) {
     for (let i = 0; i < list.length; i += 1) {
       for (let j = i + 1; j < list.length; j += 1) {
+        if (list[i].owner != null && list[i].owner === list[j].owner) continue;
+        const reach = radiusOf(list[i]) + radiusOf(list[j]);
         const ds = (Number(list[j].s) || 0) - (Number(list[i].s) || 0);
         const dOffset = (Number(list[j].offset) || 0) - (Number(list[i].offset) || 0);
         const dist = Math.hypot(ds, dOffset);
-        if (dist >= REACH) continue;
-        const gap = (REACH - dist) / 2;
+        if (dist >= reach) continue;
         const alongS = dist < 1e-6 ? 1 : ds / dist;
         const alongOffset = dist < 1e-6 ? 0 : dOffset / dist;
-        list[i].s = (Number(list[i].s) || 0) - alongS * gap;
-        list[i].offset = (Number(list[i].offset) || 0) - alongOffset * gap;
-        list[j].s = (Number(list[j].s) || 0) + alongS * gap;
-        list[j].offset = (Number(list[j].offset) || 0) + alongOffset * gap;
-        const left = Number(list[i].speed) || 0;
-        const right = Number(list[j].speed) || 0;
-        list[i].speed = left + (right - left) * 0.15;
-        list[j].speed = right + (left - right) * 0.15;
+        const full = reach - dist;
+        const iMoves = list[i].movable !== false;
+        const jMoves = list[j].movable !== false;
+        const shareI = iMoves && jMoves ? 0.5 : iMoves ? 1 : 0;
+        const shareJ = iMoves && jMoves ? 0.5 : jMoves ? 1 : 0;
+        if (shareI > 0) {
+          list[i].s = (Number(list[i].s) || 0) - alongS * full * shareI;
+          list[i].offset = (Number(list[i].offset) || 0) - alongOffset * full * shareI;
+          if (Number.isFinite(list[i].bump)) list[i].bump = Math.max(list[i].bump, 0.5);
+        }
+        if (shareJ > 0) {
+          list[j].s = (Number(list[j].s) || 0) + alongS * full * shareJ;
+          list[j].offset = (Number(list[j].offset) || 0) + alongOffset * full * shareJ;
+          if (Number.isFinite(list[j].bump)) list[j].bump = Math.max(list[j].bump, 0.5);
+        }
+        stopClosing(list[i], list[j], alongS, alongOffset);
       }
     }
   }
   return list;
+}
+
+function radiusOf(body) {
+  return Number.isFinite(body?.radius) ? Number(body.radius) : PACK_RADIUS;
+}
+
+function stopClosing(left, right, alongS, alongOffset) {
+  const leftMoves = left.movable !== false;
+  const rightMoves = right.movable !== false;
+  if (!leftMoves && !rightMoves) return;
+  const relS = (Number(right.speed) || 0) - (Number(left.speed) || 0);
+  const relOffset = (Number(right.latVel) || 0) - (Number(left.latVel) || 0);
+  const closing = relS * alongS + relOffset * alongOffset;
+  if (closing >= 0) return;
+  if (leftMoves && rightMoves) {
+    const half = -closing / 2;
+    addCourseVel(left, -alongS * half, -alongOffset * half);
+    addCourseVel(right, alongS * half, alongOffset * half);
+    return;
+  }
+  if (leftMoves) addCourseVel(left, alongS * closing, alongOffset * closing);
+  else addCourseVel(right, -alongS * closing, -alongOffset * closing);
+}
+
+function addCourseVel(body, alongS, alongOffset) {
+  body.speed = (Number(body.speed) || 0) + alongS;
+  body.latVel = (Number(body.latVel) || 0) + alongOffset;
+}
+
+// Circles bound to one ride. A seated rider is one can. A rider who hopped
+// out is a person plus a loose can, and those two do not collide.
+export function contactsOf(state, owner, movable = true) {
+  if (!state) return [];
+  const eject = state.eject;
+  if (!eject) {
+    return [{
+      owner,
+      movable,
+      radius: PACK_RADIUS,
+      get s() { return state.s; },
+      set s(value) { state.s = value; },
+      get offset() { return state.offset; },
+      set offset(value) { state.offset = value; },
+      get speed() { return state.speed; },
+      set speed(value) { state.speed = value; },
+      get latVel() { return state.latVel || 0; },
+      set latVel(value) { state.latVel = value; },
+      get bump() { return state.bump || 0; },
+      set bump(value) { state.bump = value; },
+    }];
+  }
+  return [
+    {
+      owner,
+      movable,
+      radius: FOOT_RADIUS,
+      get s() { return eject.bodyS; },
+      set s(value) { eject.bodyS = value; state.s = value; },
+      get offset() { return eject.bodyOffset; },
+      set offset(value) { eject.bodyOffset = value; state.offset = value; },
+      get speed() { return eject.bodyAlong || 0; },
+      set speed(value) { eject.bodyAlong = value; },
+      get latVel() { return eject.bodyLat || 0; },
+      set latVel(value) { eject.bodyLat = value; },
+    },
+    {
+      owner,
+      movable,
+      radius: PACK_RADIUS,
+      get s() { return eject.canS; },
+      set s(value) { eject.canS = value; },
+      get offset() { return eject.canOffset; },
+      set offset(value) { eject.canOffset = value; },
+      get speed() { return eject.canSpeed || 0; },
+      set speed(value) { eject.canSpeed = value; },
+      get latVel() { return eject.canLat || 0; },
+      set latVel(value) { eject.canLat = value; },
+    },
+  ];
+}
+
+export function poseContacts(pose, owner) {
+  if (!pose) return [];
+  if (pose.ejected) {
+    return [
+      frozenContact(owner, pose.bodyS, pose.bodyOffset, FOOT_RADIUS, 0, 0),
+      frozenContact(owner, pose.canS, pose.canOffset, PACK_RADIUS, pose.speed, 0),
+    ];
+  }
+  return [frozenContact(owner, pose.s, pose.offset, PACK_RADIUS, pose.speed, 0)];
+}
+
+function frozenContact(owner, s, offset, radius, speed, latVel) {
+  return {
+    owner,
+    movable: false,
+    radius,
+    s: Number(s) || 0,
+    offset: Number(offset) || 0,
+    speed: Number(speed) || 0,
+    latVel: Number(latVel) || 0,
+  };
+}
+
+// Keep a guest can on the host's pose without sliding through another rider.
+// The course pair (s, offset) is the same frame separatePack uses. A guest
+// who predicted past a nearby rider, while the host still has them behind,
+// snaps back even when the straight segment misses that rider.
+export function applyRiderEase(state, eased, target, blockers) {
+  if (!state) return state;
+  const blocks = Array.isArray(blockers) ? blockers : [];
+  const targetS = Number(target?.s) || 0;
+  const targetOffset = Number(target?.offset) || 0;
+  const overlapping = circleHits(state.s, state.offset, PACK_RADIUS, blocks);
+  const targetBlocked = circleHits(targetS, targetOffset, PACK_RADIUS, blocks);
+  const pathBlocked = segmentHits(state.s, state.offset, targetS, targetOffset, PACK_RADIUS, blocks);
+  const orderBlocked = !targetBlocked && (
+    crossedAhead(state.s, state.offset, targetS, targetOffset, blocks)
+    || crossedAhead(Number(eased?.s) || 0, Number(eased?.offset) || 0, targetS, targetOffset, blocks)
+  );
+  if (!targetBlocked && (overlapping || pathBlocked || orderBlocked)) {
+    state.s = targetS;
+    state.offset = targetOffset;
+    state.speed = Number(target?.speed) || 0;
+    return state;
+  }
+  state.s = Number(eased?.s) || 0;
+  state.offset = Number(eased?.offset) || 0;
+  state.speed = Number(eased?.speed) || 0;
+  separatePack([...contactsOf(state, state.owner ?? "local", true), ...blocks]);
+  return state;
+}
+
+// Guest slices run before the ease. Stop that prediction from crossing a
+// nearby rider the host still has this can behind, then let the ease pull
+// the rest of the way. Same-sign sides stay free so a real pass can finish.
+export function settleGuestPrediction(state, target, blockers, owner = "local") {
+  const blocks = Array.isArray(blockers) ? blockers : [];
+  if (!state || !blocks.length) return state;
+  separatePack([...contactsOf(state, owner, true), ...blocks]);
+  holdCourseOrder(state, target, blocks);
+  separatePack([...contactsOf(state, owner, true), ...blocks]);
+  return state;
+}
+
+function holdCourseOrder(state, target, blocks) {
+  if (!state || !target) return;
+  if (state.eject) {
+    if (!target.ejected) return;
+    clampAhead(state.eject, "bodyS", "bodyOffset", "bodyAlong", Number(target.bodyS) || 0, Number(target.bodyOffset) || 0, blocks);
+    clampAhead(state.eject, "canS", "canOffset", "canSpeed", Number(target.canS) || 0, Number(target.canOffset) || 0, blocks);
+    state.s = state.eject.bodyS;
+    state.offset = state.eject.bodyOffset;
+    return;
+  }
+  clampAhead(state, "s", "offset", "speed", Number(target.s) || 0, Number(target.offset) || 0, blocks);
+}
+
+function clampAhead(body, sKey, offsetKey, speedKey, targetS, targetOffset, blocks) {
+  const fromS = Number(body[sKey]) || 0;
+  const offset = Number(body[offsetKey]) || 0;
+  let cap = Infinity;
+  let matchSpeed = 0;
+  for (const block of blocks) {
+    const blockS = Number(block.s) || 0;
+    const blockOffset = Number(block.offset) || 0;
+    if (!(targetS < blockS && fromS > blockS)) continue;
+    const gap = Math.min(Math.abs(offset - blockOffset), Math.abs(targetOffset - blockOffset));
+    if (gap > ORDER_LANE) continue;
+    const next = blockS - 1e-3;
+    if (next < cap) {
+      cap = next;
+      matchSpeed = Number(block.speed) || 0;
+    }
+  }
+  if (cap === Infinity) return;
+  body[sKey] = cap;
+  if ((Number(body[speedKey]) || 0) > matchSpeed) body[speedKey] = matchSpeed;
+}
+
+// True when `from` is downhill of a nearby rider and the host pose is still
+// uphill of that rider. Looking back up the hill is what makes course-relative
+// A/D feel reversed on the guest's screen.
+function crossedAhead(fromS, fromOffset, targetS, targetOffset, blocks) {
+  const from = Number(fromS) || 0;
+  const target = Number(targetS) || 0;
+  for (const block of blocks) {
+    const blockS = Number(block.s) || 0;
+    if (!(target < blockS && from > blockS)) continue;
+    const blockOffset = Number(block.offset) || 0;
+    const gap = Math.min(
+      Math.abs((Number(fromOffset) || 0) - blockOffset),
+      Math.abs((Number(targetOffset) || 0) - blockOffset),
+    );
+    if (gap <= ORDER_LANE) return true;
+  }
+  return false;
+}
+
+function circleHits(s, offset, radius, blocks) {
+  for (const block of blocks) {
+    const reach = radius + radiusOf(block);
+    const ds = (Number(block.s) || 0) - (Number(s) || 0);
+    const dOffset = (Number(block.offset) || 0) - (Number(offset) || 0);
+    if (ds * ds + dOffset * dOffset < reach * reach) return true;
+  }
+  return false;
+}
+
+function segmentHits(s0, offset0, s1, offset1, radius, blocks) {
+  const abS = (Number(s1) || 0) - (Number(s0) || 0);
+  const abOffset = (Number(offset1) || 0) - (Number(offset0) || 0);
+  const len2 = abS * abS + abOffset * abOffset;
+  for (const block of blocks) {
+    const reach = radius + radiusOf(block);
+    let t = 0;
+    if (len2 > 1e-8) {
+      t = (((Number(block.s) || 0) - (Number(s0) || 0)) * abS
+        + ((Number(block.offset) || 0) - (Number(offset0) || 0)) * abOffset) / len2;
+      t = Math.max(0, Math.min(1, t));
+    }
+    const ds = (Number(s0) || 0) + abS * t - (Number(block.s) || 0);
+    const dOffset = (Number(offset0) || 0) + abOffset * t - (Number(block.offset) || 0);
+    if (ds * ds + dOffset * dOffset < reach * reach) return true;
+  }
+  return false;
 }
 
 export function takeJump(state, stick) {

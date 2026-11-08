@@ -174,6 +174,32 @@ function drawn(list, shirtRand) {
   return list[index];
 }
 
+// The Pirate button wears the hat and the barrel together. Clicking it
+// again puts back the hat and the can from before that click. A pirate
+// with nothing remembered returns to a bare head and a round can.
+export function togglePirate(look, previous) {
+  const on = look?.hat === "pirate" && look?.canShape === "barrel";
+  if (!on) {
+    return {
+      look: { ...look, hat: "pirate", canShape: "barrel" },
+      previous: {
+        hat: look?.hat || "none",
+        canShape: look?.canShape || "round",
+      },
+    };
+  }
+  let hat = previous?.hat || "none";
+  let canShape = previous?.canShape || "round";
+  if (hat === "pirate" && canShape === "barrel") {
+    hat = "none";
+    canShape = "round";
+  }
+  return {
+    look: { ...look, hat, canShape },
+    previous: null,
+  };
+}
+
 export function defaultLook() {
   return acceptedLook({
     shirtRand: RIDER_LOOKS[1].shirtRand,

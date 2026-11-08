@@ -23,6 +23,7 @@ import {
   SKIN_COLORS,
   TOPS,
   nameBlock,
+  togglePirate,
   recallLook,
   recallName,
   rememberLook,
@@ -156,6 +157,7 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   const preview = mountPreview(previewCanvas);
 
   let pirateButton = null;
+  let beforePirate = null;
   const dresser = document.createElement("div");
   dresser.id = "lobby-dresser";
   dresser.append(
@@ -602,7 +604,14 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     if (pirateButton) {
       const on = picked.hat === "pirate" && picked.canShape === "barrel";
       pirateButton.setAttribute("aria-pressed", on ? "true" : "false");
+      pirateButton.title = on
+        ? "Click again to take off the pirate hat and the barrel"
+        : "Pirate hat and wooden barrel";
     }
+  }
+
+  function choiceLabel(rows, id) {
+    return rows.find((row) => row.id === id)?.label || "";
   }
 
   function pressChoice(caption, label) {
@@ -625,17 +634,21 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     row.setAttribute("aria-label", "Pirate");
     pirateButton = document.createElement("button");
     pirateButton.type = "button";
-    pirateButton.title = "Pirate hat and wooden barrel";
     pirateButton.setAttribute("aria-label", "Pirate");
     const on = picked.hat === "pirate" && picked.canShape === "barrel";
     pirateButton.setAttribute("aria-pressed", on ? "true" : "false");
+    pirateButton.title = on
+      ? "Click again to take off the pirate hat and the barrel"
+      : "Pirate hat and wooden barrel";
     pirateButton.innerHTML = `${pirateIcon()}<span>Pirate</span>`;
     pirateButton.addEventListener("click", () => {
-      picked.hat = "pirate";
-      picked.canShape = "barrel";
+      const next = togglePirate(picked, beforePirate);
+      beforePirate = next.previous;
+      picked.hat = next.look.hat;
+      picked.canShape = next.look.canShape;
       commitLook();
-      pressChoice("Hat", "Pirate");
-      pressChoice("Shape", "Barrel");
+      pressChoice("Hat", choiceLabel(HATS, picked.hat));
+      pressChoice("Shape", choiceLabel(CAN_SHAPES, picked.canShape));
     });
     row.append(pirateButton);
     wrap.append(captionEl, row);
@@ -931,6 +944,7 @@ function mountPreview(canvas) {
 
   function showLook(look) {
     if (rider) {
+      rider.dispose?.();
       scene.remove(rider.root);
       releasePreview(rider.root);
     }

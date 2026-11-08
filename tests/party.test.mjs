@@ -2,18 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { CAN_COLORS, HAIR_COLORS, OLD_HAIR, RIDER_LOOKS, SKIN_COLORS, acceptedLook, defaultLook, faceHex, lookKey, nameBlock, recallLook, recallName, rememberLook, rememberName } from "../src/looks.js";
+import { createCourse, sampleCourse } from "../src/course.js";
+import { nameTagScale } from "../src/name-tag.js";
+import { createRideState, stepRide } from "../src/drive.js";
+import { CAN_COLORS, HAIR_COLORS, OLD_HAIR, RIDER_LOOKS, SKIN_COLORS, acceptedLook, defaultLook, faceHex, lookKey, nameBlock, recallLook, recallName, rememberLook, rememberName, togglePirate } from "../src/looks.js";
 import { createMaterials } from "../src/materials.js";
 import {
+  applyRiderEase,
   canHostDevice,
+  contactsOf,
   countdownLeft,
   createPartyClient,
   easePose,
   holdAtLine,
   playSite,
+  poseContacts,
   poseOf,
   SLOT_LOOKS,
   separatePack,
+  settleGuestPrediction,
   slotIndex,
   stickCommand,
   takeJump,
@@ -102,6 +109,241 @@ test("stacked riders push apart along the hill", () => {
   assert.equal(riders[1].offset, 0);
   assert.ok(riders[0].speed < 10);
   assert.ok(riders[1].speed > 0);
+});
+
+test("a fast can cannot ride through a stopped rider", () => {
+  const chase = { s: 0, offset: 0, speed: 24, latVel: 0, owner: "chase" };
+  const lead = { s: 1.2, offset: 0, speed: 0, latVel: 0, movable: false, owner: "lead" };
+  for (let step = 0; step < 8; step += 1) {
+    chase.s += Math.max(0, chase.speed) * 0.02;
+    separatePack([chase, lead]);
+  }
+  assert.equal(lead.s, 1.2);
+  assert.ok(lead.s - chase.s >= 1.15 - 1e-6);
+  assert.ok(chase.speed <= 1e-6);
+});
+
+test("two rolling cans stay apart along the road", () => {
+  const rear = { s: 0, offset: 0, speed: 20, latVel: 0, owner: "rear" };
+  const front = { s: 1.2, offset: 0, speed: 4, latVel: 0, owner: "front" };
+  for (let step = 0; step < 40; step += 1) {
+    rear.s += Math.max(0, rear.speed) * 0.02;
+    front.s += Math.max(0, front.speed) * 0.02;
+    separatePack([rear, front]);
+    assert.ok(front.s - rear.s >= 1.15 - 1e-6, `crossed on step ${step}`);
+  }
+});
+
+test("a can cannot steer through the can beside it", () => {
+  const me = { s: 20, offset: 0, speed: 6, latVel: 4, owner: "me" };
+  const them = { s: 20, offset: 0.4, speed: 6, latVel: 0, movable: false, owner: "them" };
+  me.offset += me.latVel * 0.02;
+  separatePack([me, them]);
+  const gap = Math.hypot(them.s - me.s, them.offset - me.offset);
+  assert.ok(gap >= 1.15 - 1e-6);
+  assert.equal(them.offset, 0.4);
+  assert.ok(me.offset < them.offset);
+  assert.ok(me.latVel <= 1e-6);
+});
+
+test("a rider does not collide with their own loose can", () => {
+  const state = {
+    s: 5,
+    offset: 0,
+    speed: 0,
+    latVel: 0,
+    eject: {
+      bodyS: 5,
+      bodyOffset: 0,
+      bodyAlong: 0,
+      bodyLat: 0,
+      canS: 5,
+      canOffset: 0,
+      canSpeed: 4,
+      canLat: 0,
+    },
+  };
+  separatePack(contactsOf(state, "ada", true));
+  assert.equal(state.eject.bodyS, 5);
+  assert.equal(state.eject.canS, 5);
+  assert.equal(state.eject.canSpeed, 4);
+});
+
+test("a can stops against another rider who hopped out", () => {
+  const can = { s: 10.1, offset: 0, speed: 8, latVel: 0, bump: 0 };
+  const walker = {
+    s: 10,
+    offset: 0,
+    speed: 0,
+    latVel: 0,
+    eject: {
+      bodyS: 10.3,
+      bodyOffset: 0,
+      bodyAlong: 0,
+      bodyLat: 0,
+      canS: 40,
+      canOffset: 8,
+      canSpeed: 0,
+      canLat: 0,
+    },
+  };
+  separatePack([
+    ...contactsOf(can, "can", true),
+    ...contactsOf(walker, "walker", false),
+  ]);
+  const gap = Math.abs(walker.eject.bodyS - can.s);
+  assert.ok(gap >= 0.45 + 0.575 - 1e-6);
+  assert.equal(walker.eject.bodyS, 10.3);
+  assert.equal(walker.eject.canS, 40);
+  assert.ok(can.s < walker.eject.bodyS);
+  assert.ok(can.bump >= 0.5);
+});
+
+test("a guest snaps to a clear host pose instead of easing through a rider", () => {
+  const state = { s: 10, offset: 0, speed: 12 };
+  const eased = easePose(state, { s: 7, offset: 0, speed: 8 }, 0.05);
+  const blocker = poseContacts({ s: 9, offset: 0, speed: 0, ejected: false }, 2);
+  applyRiderEase(state, eased, { s: 7, offset: 0, speed: 8 }, blocker);
+  assert.equal(state.s, 7);
+  assert.equal(state.offset, 0);
+  assert.equal(state.speed, 8);
+  assert.equal(blocker[0].s, 9);
+});
+
+test("the host step cannot carry one can through another", () => {
+  const course = createCourse(7);
+  const rear = createRideState(40);
+  const front = createRideState(41.2);
+  rear.speed = 24;
+  front.speed = 0;
+  for (let frame = 0; frame < 30; frame += 1) {
+    const step = 0.05;
+    const slices = Math.max(1, Math.ceil(step / 0.02));
+    const slice = step / slices;
+    for (let index = 0; index < slices; index += 1) {
+      stepRide(rear, {
+        dt: slice,
+        steer: 0,
+        throttle: 1,
+        sample: sampleCourse(course, rear.s),
+        hazards: [],
+      });
+      stepRide(front, {
+        dt: slice,
+        steer: 0,
+        throttle: 0,
+        sample: sampleCourse(course, front.s),
+        hazards: [],
+      });
+      separatePack([
+        ...contactsOf(rear, "rear", true),
+        ...contactsOf(front, "front", true),
+      ]);
+    }
+    assert.ok(front.s - rear.s >= 1.15 - 1e-4, `frame ${frame} gap ${front.s - rear.s}`);
+  }
+});
+
+test("a guest stays on the near side when the host pose is inside another rider", () => {
+  const state = { s: 10, offset: 0, speed: 12 };
+  const target = { s: 9, offset: 0, speed: 4 };
+  const eased = easePose(state, target, 0.05);
+  const blocker = poseContacts({ s: 9, offset: 0, speed: 0, ejected: false }, 2);
+  applyRiderEase(state, eased, target, blocker);
+  assert.ok(state.s - blocker[0].s >= 1.15 - 1e-6);
+  assert.equal(blocker[0].s, 9);
+});
+
+test("a guest beside a rider snaps behind when the host still has them behind", () => {
+  const state = { s: 102, offset: 1.2, speed: 16 };
+  const target = { s: 98, offset: 1.2, speed: 8 };
+  const eased = easePose(state, target, 0.016);
+  const blocker = poseContacts({ s: 100, offset: 0, speed: 8, ejected: false }, 0);
+  applyRiderEase(state, eased, target, blocker);
+  assert.equal(state.s, 98);
+  assert.equal(state.offset, 1.2);
+  assert.equal(state.speed, 8);
+  assert.equal(blocker[0].s, 100);
+});
+
+test("a wide lane whose host pose is also ahead is not pulled back", () => {
+  const state = { s: 102, offset: 6, speed: 16 };
+  const target = { s: 110, offset: 6, speed: 16 };
+  const eased = easePose(state, target, 0.016);
+  const blocker = poseContacts({ s: 100, offset: 0, speed: 8, ejected: false }, 0);
+  applyRiderEase(state, eased, target, blocker);
+  assert.ok(state.s > blocker[0].s);
+  assert.ok(state.s > 102);
+  assert.equal(blocker[0].s, 100);
+});
+
+test("a guest on the other fork is not pulled behind a rider", () => {
+  const state = { s: 102, offset: 8, speed: 16 };
+  const target = { s: 98, offset: 8, speed: 12 };
+  const eased = easePose(state, target, 0.016);
+  const blocker = poseContacts({ s: 100, offset: 0, speed: 8, ejected: false }, 0);
+  applyRiderEase(state, eased, target, blocker);
+  assert.ok(state.s > 101);
+  assert.ok(state.s < 102);
+  assert.equal(blocker[0].s, 100);
+});
+
+test("a near lane does not teleport through a rider the host says is still ahead", () => {
+  const state = { s: 96, offset: 1.2, speed: 16 };
+  const target = { s: 106, offset: 1.2, speed: 16 };
+  const eased = easePose(state, target, 0.016);
+  const blocker = poseContacts({ s: 100, offset: 0, speed: 8, ejected: false }, 0);
+  applyRiderEase(state, eased, target, blocker);
+  assert.ok(state.s < blocker[0].s);
+  assert.ok(state.s > 96);
+  assert.notEqual(state.s, target.s);
+});
+
+test("easing past a missed rider stays legal once the host pose is ahead", () => {
+  const state = { s: 99.5, offset: 1.2, speed: 16 };
+  const target = { s: 106, offset: 1.2, speed: 16 };
+  const eased = easePose(state, target, 0.05);
+  const blocker = poseContacts({ s: 100, offset: 0, speed: 8, ejected: false }, 0);
+  applyRiderEase(state, eased, target, blocker);
+  assert.ok(state.s > blocker[0].s);
+  assert.ok(state.s < 102);
+  assert.equal(blocker[0].s, 100);
+});
+
+test("guest prediction stays behind a rider the snapshot still has them behind", () => {
+  const course = createCourse(7);
+  const guest = createRideState(102);
+  guest.offset = 1.2;
+  guest.speed = 16;
+  const target = { s: 98, offset: 1.2, speed: 8, ejected: false };
+  const blockerPose = { s: 100, offset: 0, speed: 8, ejected: false };
+  let previous = null;
+  for (let frame = 0; frame < 40; frame += 1) {
+    const step = 0.05;
+    const slices = Math.max(1, Math.ceil(step / 0.02));
+    const slice = step / slices;
+    for (let index = 0; index < slices; index += 1) {
+      stepRide(guest, {
+        dt: slice,
+        steer: 0,
+        throttle: 1,
+        sample: sampleCourse(course, guest.s),
+        hazards: [],
+      });
+      const blockers = poseContacts(blockerPose, 0);
+      settleGuestPrediction(guest, target, blockers, 1);
+      assert.equal(blockers[0].s, 100);
+    }
+    const blockers = poseContacts(blockerPose, 0);
+    const eased = easePose(guest, target, step);
+    applyRiderEase(guest, eased, target, blockers);
+    assert.ok(guest.s < blockerPose.s, `frame ${frame} guest s ${guest.s}`);
+    assert.equal(blockers[0].s, 100);
+    if (previous != null) {
+      assert.ok(Math.abs(guest.s - previous) < 0.75, `frame ${frame} jump ${guest.s - previous}`);
+    }
+    previous = guest.s;
+  }
 });
 
 test("a jump is an edge and a quiet stick holds then drops", () => {
@@ -703,6 +945,93 @@ test("a blank name is published blank and cannot chat", async () => {
   assert.equal(await client.chatTransport().send("hello"), false);
 });
 
+test("a short name stays tall enough to read and a long name only grows wider", () => {
+  const ada = nameTagScale(180, 100);
+  const longer = nameTagScale(720, 100);
+  assert.ok(ada.y >= 0.3);
+  assert.ok(ada.x > 0.4);
+  assert.equal(longer.y, ada.y);
+  assert.ok(longer.x > ada.x * 2);
+});
+
+test("a rider wears their name above the head", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const rider = createRider(THREE, materials, props, defaultLook());
+  const scene = new THREE.Scene();
+  scene.add(rider.root);
+  const course = createCourse(1);
+  const sample = sampleCourse(course, 40);
+  const tag = rider.root.getObjectByName("rider-name");
+  rider.setName("   ");
+  rider.place(sample, 0, 0, 0, 0, true);
+  assert.equal(tag.visible, false);
+  rider.setName("Ada");
+  rider.place(sample, 0, 0, 0, 0, false);
+  assert.equal(tag.visible, false, "a first-person rider does not wear a floating name");
+  rider.place(sample, 0, 0, 0, 0, true);
+  assert.equal(tag.visible, true);
+  rider.root.updateWorldMatrix(true, true);
+  const tagAt = new THREE.Vector3();
+  tag.getWorldPosition(tagAt);
+  const head = rider.person.getObjectByName("person-head");
+  const box = new THREE.Box3().setFromObject(head.parent || head);
+  assert.ok(tagAt.y >= box.max.y - 1e-4, `name y ${tagAt.y} under crown ${box.max.y}`);
+  const dx = tagAt.x - (box.min.x + box.max.x) / 2;
+  const dz = tagAt.z - (box.min.z + box.max.z) / 2;
+  assert.ok(Math.hypot(dx, dz) < 0.05, `name drifted ${(Math.hypot(dx, dz)).toFixed(3)} from the head`);
+
+  const body = sampleCourse(course, 40);
+  const can = sampleCourse(course, 80);
+  rider.placeApart({
+    canSample: can,
+    canOffset: 0,
+    canSpin: 0,
+    canHop: 0,
+    bodySample: body,
+    bodyOffset: 0,
+    facing: { x: body.forward.x, z: body.forward.z },
+    showPerson: true,
+    moving: false,
+  });
+  rider.root.updateWorldMatrix(true, true);
+  tag.getWorldPosition(tagAt);
+  const bodyDist = Math.hypot(tagAt.x - body.x, tagAt.z - body.z);
+  const canDist = Math.hypot(tagAt.x - can.x, tagAt.z - can.z);
+  assert.ok(bodyDist < canDist, "the name stays with the person, not the loose can");
+  rider.dispose();
+});
+
+test("a remote rider shows the name that came with the pose", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const scene = new THREE.Scene();
+  const remotes = createRemoteRiders(THREE, scene, materials, props);
+  const course = createCourse(1);
+  remotes.show(2, { s: 12, offset: 0.4, speed: 3, displayName: "Cal" }, 0, true);
+  remotes.place(course, 0, 0);
+  const tag = scene.getObjectByName("rider-slot-2").getObjectByName("rider-name");
+  assert.equal(tag.visible, true);
+  remotes.show(2, { s: 12, offset: 0.4, speed: 3, displayName: "" }, 20, true);
+  remotes.place(course, 20, 0);
+  assert.equal(tag.visible, false);
+});
+
+test("a drawn remote pose is the pose place would draw", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const scene = new THREE.Scene();
+  const remotes = createRemoteRiders(THREE, scene, materials, props);
+  remotes.show(2, { s: 4, offset: 1, speed: 3, ejected: false }, 1000, true);
+  assert.equal(remotes.poses(1000)[0].s, 4);
+  assert.equal(remotes.poses(1000)[0].slot, 2);
+  remotes.show(2, { s: 8, offset: 1, speed: 3, ejected: false }, 1000);
+  assert.equal(remotes.poses(1000)[0].s, 4);
+  const halfway = remotes.poses(1025)[0].s;
+  assert.ok(halfway > 4 && halfway < 8);
+  assert.equal(remotes.poses(1100)[0].s, 8);
+});
+
 test("a remote rider wears a sent look and keeps the slot color when the look is missing", () => {
   const materials = createMaterials(THREE);
   const props = createProps(THREE, materials);
@@ -808,6 +1137,21 @@ test("a seated skirt stays inside the can and a standing one keeps its hem", () 
   barrel.person.userData.pose = "walk";
   animatePerson(barrel.person, 0);
   assert.equal(findNamed(barrel.person, "person-skirt").scale.x, 1);
+});
+
+test("clicking pirate again puts back the hat and the can", () => {
+  const square = { ...defaultLook(), hat: "none", canShape: "square" };
+  const on = togglePirate(square, null);
+  assert.equal(on.look.hat, "pirate");
+  assert.equal(on.look.canShape, "barrel");
+  assert.equal(on.previous.canShape, "square");
+  const off = togglePirate(on.look, on.previous);
+  assert.equal(off.look.hat, "none");
+  assert.equal(off.look.canShape, "square");
+  assert.equal(off.previous, null);
+  const saved = togglePirate({ ...defaultLook(), hat: "pirate", canShape: "barrel" }, null);
+  assert.equal(saved.look.hat, "none");
+  assert.equal(saved.look.canShape, "round");
 });
 
 test("a pirate hat and a wooden barrel are part of the look", () => {

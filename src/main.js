@@ -12,13 +12,17 @@ import {
   canHostDevice,
   countdownLeft,
   createPartyClient,
+  applyRiderEase,
+  contactsOf,
   easePose,
   holdAtLine,
   playBase,
   playSite,
+  poseContacts,
   poseOf,
   wantsSolo,
   separatePack,
+  settleGuestPrediction,
   slotIndex,
   stickCommand,
   takeJump,
@@ -27,7 +31,7 @@ import { createRemoteRiders } from "./remotes.js";
 import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, wrapAngle } from "./course.js";
 import { createDaylight } from "./daylight.js";
 import { createRideState, stepRide, walkerForward } from "./drive.js";
-import { acceptedLook, lookKey, nameBlock } from "./looks.js";
+import { acceptedLook, cleanName, lookKey, nameBlock } from "./looks.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "./look.js";
 import { createMaterials } from "./materials.js";
 import { createProps } from "./props.js";
@@ -673,6 +677,7 @@ function placeWorld(presenting) {
   const viewHop = ejected ? bodyAir : bumpHop * 0.25 + Math.min(0.08, air * 0.15);
   const followX = posed.x + posed.right.x * followOffset;
   const followZ = posed.z + posed.right.z * followOffset;
+  rider.setName(lobby.name());
   if (ejected) {
     const canSample = sampleCourse(course, ejected.canS);
     rider.placeApart({
@@ -902,6 +907,11 @@ function lookFields(raw) {
   return { ...look };
 }
 
+function nameForSlot(slot, entry) {
+  if (slot === mySlot) return cleanName(lobby.name());
+  return cleanName(entry?.name) || cleanName(partySlots.find((row) => row.slot === slot)?.displayName);
+}
+
 function wearLook() {
   if (!rideProps || !materials || !rider) return;
   const next = lobby.look();
@@ -912,6 +922,7 @@ function wearLook() {
   const position = old.position.clone();
   const quaternion = old.quaternion.clone();
   const scale = old.scale.clone();
+  rider.dispose?.();
   old.removeFromParent();
   rider = createRider(THREE, materials, rideProps, next);
   rider.root.position.copy(position);
@@ -1317,6 +1328,8 @@ function onPartyEvent(event) {
     const entry = ensureRemote(slot);
     entry.stick = event;
     noteLook(entry, event);
+    const named = cleanName(event.displayName);
+    if (named) entry.name = named;
     if (held()) return;
     wakeRemote(entry);
     entry.lastStickAt = performance.now();
@@ -1349,63 +1362,103 @@ function noteHostSilence() {
   }
 }
 
-function stepRemoteRiders(slice, slices, hazards) {
+function planRemoteFrame() {
   const now = performance.now();
-  const mounted = [];
-  if (!ride.eject) mounted.push(ride);
+  const planned = [];
   for (const [slot, entry] of [...remoteRides]) {
-    if (entry.lastStickAt === 0) {
-      if (!entry.state.eject) mounted.push(entry.state);
-      continue;
-    }
+    if (entry.lastStickAt === 0) continue;
     const age = (now - entry.lastStickAt) / 1000;
     const command = stickCommand(entry.stick, age);
     if (!command) {
       remoteRides.delete(slot);
       continue;
     }
-    const jump = takeJump(entry.state, command);
-    for (let index = 0; index < slices; index += 1) {
-      stepRide(entry.state, {
-        dt: slice,
-        steer: command.steer || 0,
-        throttle: command.throttle || 0,
-        jump,
-        strafe: command.strafe || 0,
-        sample: sampleCourse(course, entry.state.s),
-        canSample: entry.state.eject ? sampleCourse(course, entry.state.eject.canS) : null,
-        hazards,
-      });
-    }
-    entry.state.events.length = 0;
-    if (!entry.state.eject) mounted.push(entry.state);
+    planned.push({
+      slot,
+      entry,
+      command,
+      jump: takeJump(entry.state, command),
+    });
   }
-  if (mounted.length > 1) separatePack(mounted);
+  return planned;
 }
 
-function easeLocalRider(step) {
+function stepPlannedRemote(planned, slice, hazards) {
+  for (const row of planned) {
+    if (!remoteRides.has(row.slot)) continue;
+    const command = row.command;
+    stepRide(row.entry.state, {
+      dt: slice,
+      steer: command.steer || 0,
+      throttle: command.throttle || 0,
+      jump: row.jump,
+      strafe: command.strafe || 0,
+      sample: sampleCourse(course, row.entry.state.s),
+      canSample: row.entry.state.eject ? sampleCourse(course, row.entry.state.eject.canS) : null,
+      hazards,
+    });
+    row.entry.state.events.length = 0;
+  }
+}
+
+function resolvePlayers() {
+  const bodies = contactsOf(ride, mySlot, true);
+  for (const [slot, entry] of remoteRides) {
+    bodies.push(...contactsOf(entry.state, slot, true));
+  }
+  if (bodies.length > 1) separatePack(bodies);
+}
+
+function guestSnapshotBodies() {
+  const blockers = [];
+  let mine = null;
+  for (const pose of latestSnapshot?.riders || []) {
+    const slot = slotIndex(pose);
+    if (slot == null) continue;
+    if (slot === mySlot) mine = pose;
+    else blockers.push(...poseContacts(pose, slot));
+  }
+  return { mine, blockers };
+}
+
+function remoteBlockers(now) {
+  const drawn = remotes?.poses?.(now) || [];
+  const blockers = [];
+  for (const pose of drawn) {
+    const slot = slotIndex(pose);
+    if (slot == null || slot === mySlot) continue;
+    blockers.push(...poseContacts(pose, slot));
+  }
+  return blockers;
+}
+
+function easeLocalRider(step, now) {
   if (!latestSnapshot || held()) return;
   const mine = (latestSnapshot.riders || []).find((row) => slotIndex(row) === mySlot);
   if (!mine) return;
+  const blockers = remoteBlockers(now);
+  if (ride.eject && mine.ejected) {
+    const canEased = easePose(
+      { s: ride.eject.canS, offset: ride.eject.canOffset, speed: ride.eject.canSpeed || 0 },
+      { s: mine.canS, offset: mine.canOffset, speed: mine.speed },
+      step,
+    );
+    ride.eject.canS = canEased.s;
+    ride.eject.canOffset = canEased.offset;
+    const bodyEased = easePose(
+      { s: ride.eject.bodyS, offset: ride.eject.bodyOffset, speed: 0 },
+      { s: mine.bodyS, offset: mine.bodyOffset, speed: mine.speed },
+      step,
+    );
+    ride.eject.bodyS = bodyEased.s;
+    ride.eject.bodyOffset = bodyEased.offset;
+    ride.s = bodyEased.s;
+    ride.offset = bodyEased.offset;
+    settleGuestPrediction(ride, mine, blockers, mySlot);
+    return;
+  }
   const eased = easePose(ride, mine, step);
-  ride.s = eased.s;
-  ride.offset = eased.offset;
-  ride.speed = eased.speed;
-  if (!(ride.eject && mine.ejected)) return;
-  const canEased = easePose(
-    { s: ride.eject.canS, offset: ride.eject.canOffset, speed: ride.eject.canSpeed || 0 },
-    { s: mine.canS, offset: mine.canOffset, speed: mine.speed },
-    step,
-  );
-  ride.eject.canS = canEased.s;
-  ride.eject.canOffset = canEased.offset;
-  const bodyEased = easePose(
-    { s: ride.eject.bodyS, offset: ride.eject.bodyOffset, speed: 0 },
-    { s: mine.bodyS, offset: mine.bodyOffset, speed: mine.speed },
-    step,
-  );
-  ride.eject.bodyS = bodyEased.s;
-  ride.eject.bodyOffset = bodyEased.offset;
+  applyRiderEase(ride, eased, mine, blockers);
 }
 
 function publishRemotePoses(now) {
@@ -1413,7 +1466,11 @@ function publishRemotePoses(now) {
   if (partyMode === "host") {
     for (const [slot, entry] of remoteRides) {
       live.add(slot);
-      remotes.show(slot, { ...poseOf(entry.state), ...lookFields(entry.look) }, now, true);
+      remotes.show(slot, {
+        ...poseOf(entry.state),
+        ...lookFields(entry.look),
+        displayName: nameForSlot(slot, entry),
+      }, now, true);
     }
     remotes.retain(live);
     return;
@@ -1427,7 +1484,10 @@ function publishRemotePoses(now) {
     if (slot == null || slot === mySlot) continue;
     live.add(slot);
     if (pose !== shownSnapshot.get(slot)) {
-      remotes.show(slot, pose, now);
+      remotes.show(slot, {
+        ...pose,
+        displayName: cleanName(pose.displayName) || nameForSlot(slot),
+      }, now);
       shownSnapshot.set(slot, pose);
     }
   }
@@ -1456,13 +1516,24 @@ function sendParty(step) {
       throttle: resting ? 0 : pending.throttle || 0,
       strafe: resting ? 0 : pending.strafe || 0,
       jumpSeq,
+      displayName: cleanName(lobby.name()),
       ...lookFields(lobby.look()),
     });
     return;
   }
-  const riders = [{ slot: mySlot, ...poseOf(ride), ...lookFields(lobby.look()) }];
+  const riders = [{
+    slot: mySlot,
+    ...poseOf(ride),
+    ...lookFields(lobby.look()),
+    displayName: nameForSlot(mySlot),
+  }];
   for (const [slot, entry] of remoteRides) {
-    riders.push({ slot, ...poseOf(entry.state), ...lookFields(entry.look) });
+    riders.push({
+      slot,
+      ...poseOf(entry.state),
+      ...lookFields(entry.look),
+      displayName: nameForSlot(slot, entry),
+    });
   }
   partyClient.sendSnapshot({ riders });
 }
@@ -1531,6 +1602,7 @@ function tickBody(dt) {
   ride.events.length = 0;
   const slices = Math.max(1, Math.ceil(step / 0.02));
   const slice = step / slices;
+  const planned = partyMode === "host" && !held() ? planRemoteFrame() : null;
   if (held()) {
     holdAtLine(ride, START_S);
     const stagger = gate === "countdown";
@@ -1551,11 +1623,24 @@ function tickBody(dt) {
         canSample: ride.eject ? sampleCourse(course, ride.eject.canS) : null,
         hazards,
       });
+      if (partyMode === "player" && latestSnapshot) {
+        const { mine, blockers } = guestSnapshotBodies();
+        if (remotes) blockers.push(...remoteBlockers(performance.now()));
+        if (blockers.length) settleGuestPrediction(ride, mine, blockers, mySlot);
+      }
+      if (planned) {
+        stepPlannedRemote(planned, slice, hazards);
+        resolvePlayers();
+      }
     }
   }
   town.noteHits(ride.events);
-  if (partyMode === "host" && !held()) stepRemoteRiders(slice, slices, hazards);
-  if (partyMode === "player" && !held()) easeLocalRider(step);
+  let guestPoseAt = 0;
+  if (partyMode === "player" && !held()) {
+    guestPoseAt = performance.now();
+    if (remotes) publishRemotePoses(guestPoseAt);
+    easeLocalRider(step, guestPoseAt);
+  }
   sound.update({
     dt: step,
     ride,
@@ -1569,8 +1654,8 @@ function tickBody(dt) {
   }
   placeWorld(presenting);
   if (partyMode && remotes) {
-    const now = performance.now();
-    publishRemotePoses(now);
+    const now = guestPoseAt || performance.now();
+    if (!guestPoseAt) publishRemotePoses(now);
     remotes.place(course, now, elapsed);
   }
   hudTimer += step;
