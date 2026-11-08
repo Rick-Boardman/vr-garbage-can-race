@@ -1139,6 +1139,117 @@ test("a seated skirt stays inside the can and a standing one keeps its hem", () 
   assert.equal(findNamed(barrel.person, "person-skirt").scale.x, 1);
 });
 
+test("a rocket outruns a plain can, a spring hops, and a bumper keeps its speed", () => {
+  assert.equal(defaultLook().feature, "none");
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, feature: "rocket" }).feature, "rocket");
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, feature: "spoiler" }).feature, "none");
+  assert.notEqual(lookKey(defaultLook()), lookKey({ ...defaultLook(), feature: "bumper" }));
+
+  const course = createCourse(7);
+  const plain = createRideState(80);
+  const rocket = createRideState(80);
+  for (let frame = 0; frame < 80; frame += 1) {
+    stepRide(plain, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 1,
+      sample: sampleCourse(course, plain.s),
+      hazards: [],
+      feature: "none",
+    });
+    stepRide(rocket, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 1,
+      sample: sampleCourse(course, rocket.s),
+      hazards: [],
+      feature: "rocket",
+    });
+  }
+  assert.ok(plain.speed <= 24 + 1e-6, `plain ${plain.speed}`);
+  assert.ok(rocket.speed > 24, `rocket ${rocket.speed}`);
+
+  const at = sampleCourse(course, 80);
+  const hole = { id: "hole-feature", kind: "pothole", x: at.x, z: at.z, radius: 2 };
+  const hopped = createRideState(80);
+  const sprung = createRideState(80);
+  hopped.speed = 10;
+  sprung.speed = 10;
+  stepRide(hopped, { dt: 0.05, steer: 0, throttle: 0, sample: at, hazards: [hole], feature: "none" });
+  stepRide(sprung, {
+    dt: 0.05,
+    steer: 0,
+    throttle: 0,
+    sample: at,
+    hazards: [{ ...hole, id: "hole-spring" }],
+    feature: "spring",
+  });
+  assert.ok(sprung.hopVy > hopped.hopVy);
+
+  // The shoulder hit is the step that starts already past the soft edge
+  // while the last step still said the can was on the road.
+  const soft = at.halfWidth - 0.35;
+  const curb = createRideState(80);
+  const padded = createRideState(80);
+  curb.offset = soft + 0.2;
+  padded.offset = soft + 0.2;
+  curb.speed = 12;
+  padded.speed = 12;
+  stepRide(curb, { dt: 0.05, steer: 0, throttle: 0, sample: at, hazards: [], feature: "none" });
+  stepRide(padded, { dt: 0.05, steer: 0, throttle: 0, sample: at, hazards: [], feature: "bumper" });
+  assert.equal(curb.onShoulder, true);
+  assert.equal(padded.onShoulder, true);
+  assert.ok(padded.speed > curb.speed);
+
+  const beside = {
+    id: "bonus-car",
+    kind: "car",
+    x: at.x + at.right.x * 2,
+    z: at.z + at.right.z * 2,
+    halfL: 2.15,
+    halfW: 0.95,
+    fx: at.forward.x,
+    fz: at.forward.z,
+    rx: at.right.x,
+    rz: at.right.z,
+  };
+  const miss = createRideState(80);
+  stepRide(miss, { dt: 0.05, steer: 0, throttle: 0, sample: at, hazards: [beside] });
+  assert.equal(miss.nearMisses, 1);
+  assert.equal(miss.bonus, 15);
+  miss.hop = 1;
+  miss.hopVy = 2;
+  stepRide(miss, { dt: 0.05, steer: 0, throttle: 0, sample: at, hazards: [] });
+  assert.ok(miss.bonus > 15);
+
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const rider = createRider(THREE, materials, props, { ...defaultLook(), feature: "rocket" });
+  rider.root.updateMatrixWorld(true);
+  const nozzle = rider.root.getObjectByName("can-rocket");
+  const rocketCan = new THREE.Box3().setFromObject(rider.root.getObjectByName("rider-can"));
+  const rocketBox = new THREE.Box3().setFromObject(nozzle);
+  assert.ok(rocketBox.max.z > rocketCan.max.z);
+  const flame = rider.root.getObjectByName("can-rocket-flame");
+  assert.equal(flame.visible, false);
+  rider.setTuck(1);
+  assert.equal(flame.visible, true);
+  const sprungCan = createRider(THREE, materials, props, { ...defaultLook(), feature: "spring" });
+  sprungCan.root.updateMatrixWorld(true);
+  const springCan = new THREE.Box3().setFromObject(sprungCan.root.getObjectByName("rider-can"));
+  const springBox = new THREE.Box3().setFromObject(sprungCan.root.getObjectByName("can-spring"));
+  assert.ok(springBox.max.x > springCan.max.x);
+  assert.equal(sprungCan.root.getObjectByName("can-rocket"), undefined);
+  const paddedCan = createRider(THREE, materials, props, { ...defaultLook(), feature: "bumper" });
+  paddedCan.root.updateMatrixWorld(true);
+  const bumperShell = new THREE.Box3().setFromObject(paddedCan.root.getObjectByName("rider-can"));
+  const bumperBox = new THREE.Box3().setFromObject(paddedCan.root.getObjectByName("can-bumper"));
+  assert.ok(bumperBox.max.x > bumperShell.max.x);
+  rider.dispose();
+  sprungCan.dispose();
+  paddedCan.dispose();
+});
+
 test("clicking pirate again puts back the hat and the can", () => {
   const square = { ...defaultLook(), hat: "none", canShape: "square" };
   const on = togglePirate(square, null);

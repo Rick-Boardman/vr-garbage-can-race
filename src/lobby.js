@@ -10,6 +10,7 @@ import {
   BODIES,
   BOTTOMS,
   CAN_COLORS,
+  CAN_FEATURES,
   CAN_MATERIALS,
   CAN_SHAPES,
   CAN_SIZES,
@@ -178,6 +179,7 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     iconRow("Shape", CAN_SHAPES, "canShape", canIcon),
     iconRow("Size", CAN_SIZES, "canSize", sizeIcon),
     iconRow("Finish", CAN_MATERIALS, "canMaterial", finishIcon),
+    iconRow("Feature", CAN_FEATURES, "feature", featureIcon),
     pickRow("Can color", CAN_COLORS, "can"),
     groupLabel("Mark"),
     iconRow("Logo", LOGOS, "logo", logoIcon),
@@ -812,6 +814,19 @@ function sizeIcon(item) {
   const width = item.id === "small" ? 10 : item.id === "big" ? 18 : 14;
   const x = 24 - width;
   return svg(`<rect x="${x}" y="10" width="${width * 2}" height="28" rx="4" fill="currentColor"/>`);
+}
+
+function featureIcon(item) {
+  if (item.id === "rocket") {
+    return svg(`<path d="M24 4 L31 18 H27 L33 42 H15 L21 18 H17 Z" fill="currentColor"/>`);
+  }
+  if (item.id === "spring") {
+    return svg(`<path d="M12 12 H36 M12 20 H36 M12 28 H36 M12 36 H36" stroke="currentColor" stroke-width="3" fill="none"/>`);
+  }
+  if (item.id === "bumper") {
+    return svg(`<ellipse cx="24" cy="24" rx="16" ry="8" fill="none" stroke="currentColor" stroke-width="4"/>`);
+  }
+  return svg(`<circle cx="24" cy="24" r="10" fill="none" stroke="currentColor" stroke-width="2"/>`);
 }
 
 function finishIcon(item) {

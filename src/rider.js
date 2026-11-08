@@ -60,6 +60,7 @@ export function createRider(THREE, materials, props, look = null) {
   shadow.scale.setScalar(canScale);
 
   const logoMount = addLogo(THREE, materials, look);
+  const feature = addCanFeature(THREE, look, canScale);
   const nameTag = createNameTag(THREE);
   const nameBox = new THREE.Box3();
   const nameAnchor = new THREE.Vector3();
@@ -70,6 +71,7 @@ export function createRider(THREE, materials, props, look = null) {
     logoMount.scale.copy(can.scale);
     root.add(logoMount);
   }
+  if (feature) root.add(feature);
 
   // The mark is a sibling of the spinning shell, parked on the camera side.
   function parkLogo(tilt) {
@@ -83,6 +85,25 @@ export function createRider(THREE, materials, props, look = null) {
     logoMount.position.copy(can.position);
     applyFrame(logoMount, sample, 0);
     if (tilt) logoMount.rotateX(tilt);
+  }
+
+  // The bolt-on stays on the can's back, the chase side, and does not spin.
+  function parkFeature(tilt) {
+    if (!feature) return;
+    feature.position.copy(can.position);
+    feature.rotation.set(tilt, 0, 0);
+  }
+
+  function parkFeatureApart(sample, tilt) {
+    if (!feature) return;
+    feature.position.copy(can.position);
+    applyFrame(feature, sample, 0);
+    if (tilt) feature.rotateX(tilt);
+  }
+
+  function setTuck(value) {
+    const flame = feature?.getObjectByName("can-rocket-flame");
+    if (flame) flame.visible = (Number(value) || 0) > 0.05;
   }
 
   function place(sample, offset, spin, bank, hop, showPerson) {
@@ -99,6 +120,7 @@ export function createRider(THREE, materials, props, look = null) {
     // The shell rolls on yaw. The mark stays on the rider's +z, the side
     // the chase camera sits on, and only tips when the can tips.
     parkLogo(tilt);
+    parkFeature(tilt);
     person.position.set(0, seatedPersonY(), 0);
     person.rotation.set(0, 0, 0);
     person.userData.pose = "ride";
@@ -136,6 +158,7 @@ export function createRider(THREE, materials, props, look = null) {
     can.rotateX(tilt);
     liftAlong(can, canSample, canGroundClearance(tilt) * canScale);
     parkLogoApart(canSample, tilt);
+    parkFeatureApart(canSample, tilt);
     const fx = facing?.x ?? bodySample.forward.x;
     const fz = facing?.z ?? bodySample.forward.z;
     const length = Math.hypot(fx, fz) || 1;
@@ -200,9 +223,13 @@ export function createRider(THREE, materials, props, look = null) {
 
   function dispose() {
     nameTag.dispose();
+    feature?.traverse((obj) => {
+      if (obj.geometry && !obj.geometry.userData.shared) obj.geometry.dispose();
+      if (obj.material?.userData?.owned) obj.material.dispose();
+    });
   }
 
-  return { root, place, placeApart, animate, person, setName, dispose };
+  return { root, place, placeApart, animate, person, setName, setTuck, dispose };
 }
 
 function listedHex(list, key, value) {
@@ -231,6 +258,63 @@ function personStyle(look) {
     ...(hairColor != null ? { hairColor } : {}),
     complexion,
   };
+}
+
+function ownedLambert(THREE, color) {
+  const material = new THREE.MeshLambertMaterial({ color });
+  material.userData.owned = true;
+  return material;
+}
+
+// Local +z is the chase side, behind the rider. The rocket points uphill.
+function addCanFeature(THREE, look, canScale) {
+  const kind = look?.feature;
+  if (kind !== "rocket" && kind !== "spring" && kind !== "bumper") return null;
+  const group = new THREE.Group();
+  group.name = "can-feature";
+  group.scale.setScalar(canScale);
+  if (kind === "rocket") {
+    const nozzle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 0.28, 8),
+      ownedLambert(THREE, 0x2a241c),
+    );
+    nozzle.name = "can-rocket";
+    nozzle.rotation.x = Math.PI / 2;
+    nozzle.position.set(0, 0.36, 0.62);
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.07, 0.22, 8),
+      ownedLambert(THREE, 0xf27a1a),
+    );
+    flame.name = "can-rocket-flame";
+    flame.rotation.x = -Math.PI / 2;
+    flame.position.set(0, 0.36, 0.86);
+    flame.visible = false;
+    group.add(nozzle, flame);
+    return group;
+  }
+  if (kind === "spring") {
+    // The shell is about 0.52 across. Coils sit outside it or the can hides them.
+    for (let i = 0; i < 3; i += 1) {
+      const coil = new THREE.Mesh(
+        new THREE.TorusGeometry(0.56, 0.032, 6, 12),
+        ownedLambert(THREE, 0xc46a2f),
+      );
+      coil.name = "can-spring";
+      coil.rotation.x = Math.PI / 2;
+      coil.position.set(0, 0.2 + i * 0.16, 0);
+      group.add(coil);
+    }
+    return group;
+  }
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.58, 0.045, 6, 16),
+    ownedLambert(THREE, 0x1c1c1c),
+  );
+  ring.name = "can-bumper";
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(0, 0.28, 0);
+  group.add(ring);
+  return group;
 }
 
 function canScaleOf(look) {

@@ -1,4 +1,5 @@
 import { createWebXrSystemKeyboardBridge } from "../node_modules/@rb/halo/src/webxr-system-keyboard.js";
+import { readExtreme, writeExtreme } from "./extreme.js";
 
 // In-scene graphics and sound controls. Halo's settings window otherwise
 // draws clickable text rows. These are a dropdown, a number field, checkboxes,
@@ -112,6 +113,8 @@ export function panelLayout(width, height, tiers) {
   y += ROW_H + GAP;
   const mute = { x: PAD, y, w: w - PAD * 2, h: ROW_H };
   y += ROW_H + GAP;
+  const extreme = { x: PAD, y, w: w - PAD * 2, h: ROW_H };
+  y += ROW_H + GAP;
   const calibrate = { x: PAD, y, w: w - PAD * 2, h: 36 };
   const named = qualityOptions(tiers);
   let options = named.map((option, i) => ({
@@ -129,7 +132,7 @@ export function panelLayout(width, height, tiers) {
       y: quality.y - 4 - listH + i * OPTION_H,
     }));
   }
-  return { status, quality, options, ratio, automatic, volume, mute, calibrate };
+  return { status, quality, options, ratio, automatic, volume, mute, extreme, calibrate };
 }
 
 export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, notes = null }) {
@@ -149,6 +152,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
   let signature = "";
   let hoverKey = "";
   let keyboard = null;
+  let extremeOn = readExtreme();
 
   const onKeyDown = (event) => handleKey(event);
   window.addEventListener("keydown", onKeyDown, true);
@@ -283,6 +287,11 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
       calibration.setMuted(!calibration.audio.muted);
       return;
     }
+    if (contains(layout.extreme, x, y)) {
+      extremeOn = !extremeOn;
+      writeExtreme(extremeOn);
+      return;
+    }
     if (contains(layout.calibrate, x, y)) calibration.recalibrate();
   }
 
@@ -296,6 +305,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
     if (contains(layout.automatic, x, y)) return "automatic";
     if (contains(layout.volume, x, y)) return "volume";
     if (contains(layout.mute, x, y)) return "mute";
+    if (contains(layout.extreme, x, y)) return "extreme";
     if (contains(layout.calibrate, x, y)) return "calibrate";
     return "";
   }
@@ -414,6 +424,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
       calibration.mode,
       audio.level,
       audio.muted,
+      extremeOn,
       menuOpen,
       ratioFocused,
       ratioDraft,
@@ -456,6 +467,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
     drawLabel(layout.volume, "Volume");
     drawSlider(layout.volume, audio.level);
     drawCheck(layout.mute, "Mute", audio.muted, hoverKey === "mute");
+    drawCheck(layout.extreme, "Extreme crashes", extremeOn, hoverKey === "extreme");
     drawButton(layout.calibrate, "Calibrate again", hoverKey === "calibrate");
     drawNotes(layout.calibrate, noteLines);
     if (menuOpen) {
@@ -615,5 +627,11 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
     view.stroke();
   }
 
-  return { prepare, afterHud, isTyping, dispose };
+  return {
+    prepare,
+    afterHud,
+    isTyping,
+    dispose,
+    extreme: () => extremeOn,
+  };
 }

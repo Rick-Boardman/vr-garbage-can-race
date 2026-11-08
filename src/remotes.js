@@ -102,5 +102,6 @@ function placeRider(rider, course, pose, elapsed) {
     const sample = sampleCourse(course, pose.s);
     rider.place(sample, pose.offset || 0, pose.spin || 0, 0, pose.hop || 0, true);
   }
+  rider.setTuck?.(pose.ejected ? 0 : ((pose.speed || 0) > 12 ? 1 : 0));
   rider.animate(elapsed);
 }

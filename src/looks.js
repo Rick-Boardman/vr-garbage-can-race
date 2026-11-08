@@ -144,6 +144,14 @@ export const CAN_MATERIALS = [
   { id: "rubber", label: "Rubber" },
 ];
 
+// Bolted on in the dresser. None leaves the can as it was.
+export const CAN_FEATURES = [
+  { id: "none", label: "None" },
+  { id: "rocket", label: "Rocket" },
+  { id: "spring", label: "Spring" },
+  { id: "bumper", label: "Bumper" },
+];
+
 export const LOGOS = [
   { id: "none", label: "None" },
   { id: "star", label: "Star" },
@@ -233,6 +241,7 @@ export function acceptedLook(raw) {
     canShape: choice(CAN_SHAPES, raw?.canShape, "round"),
     canSize: choice(CAN_SIZES, raw?.canSize, "regular"),
     canMaterial: choice(CAN_MATERIALS, raw?.canMaterial, "metal"),
+    feature: choice(CAN_FEATURES, raw?.feature, "none"),
     can: color.can,
     logo: choice(LOGOS, raw?.logo, "none"),
     logoColor,
@@ -255,6 +264,7 @@ export function lookKey(raw) {
     look.canShape,
     look.canSize,
     look.canMaterial,
+    look.feature,
     look.can,
     look.logo,
     look.logoColor,

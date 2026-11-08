@@ -31,6 +31,7 @@ import { createRemoteRiders } from "./remotes.js";
 import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, wrapAngle } from "./course.js";
 import { createDaylight } from "./daylight.js";
 import { createRideState, stepRide, walkerForward } from "./drive.js";
+import { createExtremeScraps, readExtreme } from "./extreme.js";
 import { acceptedLook, cleanName, lookKey, nameBlock } from "./looks.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "./look.js";
 import { createMaterials } from "./materials.js";
@@ -94,6 +95,10 @@ const viewParam = params.get("view");
 
 let course = createCourse(Number.isFinite(seedParam) && seedParam > 0 ? seedParam : (Math.random() * 0xffffffff) >>> 0);
 let ride = createRideState(START_S);
+let scraps = null;
+let seenCrash = 0;
+let seenBumps = 0;
+let seenBump = 0;
 ride.best = readBest();
 let viewIndex = viewParam === "first" ? 0 : viewParam === "far" ? 2 : 1;
 let lastHeading = null;
@@ -376,6 +381,8 @@ const boot = createSceneHudBootstrap({
     rider = createRider(THREE, materials, rideProps, firstLook);
     wornKey = lookKey(firstLook);
     scene.add(rider.root);
+    scraps = createExtremeScraps(THREE);
+    scene.add(scraps.group);
     remotes = createRemoteRiders(THREE, scene, materials, rideProps);
     town = createTown(THREE, scene, materials, rideProps);
   },
@@ -597,7 +604,7 @@ function updateHud() {
   if (frameRate > 0) lines.push(`${Math.round(frameRate)} fps`);
   lines.push(
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
-    `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}`,
+    `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}   bonus ${Math.floor(ride.bonus || 0)}`,
   );
   if (hillNote) {
     for (const line of hillNote.split("\n")) {
@@ -678,6 +685,7 @@ function placeWorld(presenting) {
   const followX = posed.x + posed.right.x * followOffset;
   const followZ = posed.z + posed.right.z * followOffset;
   rider.setName(lobby.name());
+  rider.setTuck?.(ejected ? 0 : Math.max(0, pending.throttle || 0));
   if (ejected) {
     const canSample = sampleCourse(course, ejected.canS);
     rider.placeApart({
@@ -715,7 +723,8 @@ function placeWorld(presenting) {
     camera.rotation.set(0, 0, 0);
   } else {
     player.position.set(followX, posed.y + shoulder + view.pivot + viewHop, followZ);
-    const kick = ride.shake > 0.02 ? ride.shake * 0.012 : 0;
+    const kickScale = readExtreme() ? 0.35 : 0.012;
+    const kick = ride.shake > 0.02 ? ride.shake * kickScale : 0;
     camera.position.set(
       view.cam[0] + (kick ? (Math.random() - 0.5) * kick : 0),
       view.cam[1] + (kick ? (Math.random() - 0.5) * kick : 0),
@@ -831,6 +840,10 @@ function newHill(nextSeed) {
   const best = Math.max(ride.best, readBest());
   ride = createRideState(START_S);
   ride.best = best;
+  seenCrash = 0;
+  seenBumps = 0;
+  seenBump = 0;
+  scraps?.clear();
   persistedBest = best;
   lastHeading = null;
   pending = { steer: 0, throttle: 0, jump: false, strafe: 0, source: "keys" };
@@ -1393,6 +1406,7 @@ function stepPlannedRemote(planned, slice, hazards) {
       throttle: command.throttle || 0,
       jump: row.jump,
       strafe: command.strafe || 0,
+      feature: row.entry.look?.feature || "none",
       sample: sampleCourse(course, row.entry.state.s),
       canSample: row.entry.state.eject ? sampleCourse(course, row.entry.state.eject.canS) : null,
       hazards,
@@ -1555,6 +1569,28 @@ function tick({ dt }) {
   tickBody(dt);
 }
 
+function noteExtremeHit() {
+  if (!scraps) return;
+  if (!readExtreme()) {
+    scraps.clear();
+    seenCrash = ride.crashes;
+    seenBumps = ride.bumps;
+    seenBump = ride.bump;
+    return;
+  }
+  const hit = ride.crashes > seenCrash
+    || ride.bumps > seenBumps
+    || (ride.bump >= 0.5 && seenBump < 0.5);
+  seenCrash = ride.crashes;
+  seenBumps = ride.bumps;
+  seenBump = ride.bump;
+  if (!hit) return;
+  const sample = sampleCourse(course, ride.eject ? ride.eject.canS : ride.s);
+  const offset = ride.eject ? ride.eject.canOffset : ride.offset;
+  const side = Math.sign(offset) || Math.sign(ride.latVel) || 1;
+  scraps.burst(sample, offset, side);
+}
+
 function tickBody(dt) {
   const step = Math.min(Math.max(dt || 0, 0), 0.05);
   elapsed += step;
@@ -1619,6 +1655,7 @@ function tickBody(dt) {
         throttle: pending.throttle,
         jump: pending.jump,
         strafe: pending.strafe || 0,
+        feature: lobby.look()?.feature || "none",
         sample: sampleCourse(course, ride.s),
         canSample: ride.eject ? sampleCourse(course, ride.eject.canS) : null,
         hazards,
@@ -1635,6 +1672,8 @@ function tickBody(dt) {
     }
   }
   town.noteHits(ride.events);
+  noteExtremeHit();
+  scraps?.step(step, course);
   let guestPoseAt = 0;
   if (partyMode === "player" && !held()) {
     guestPoseAt = performance.now();

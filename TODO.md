@@ -2,8 +2,8 @@
 
 - [x] Character selection and customization
 - [x] Can selection and customization
-- [ ] Features and bonuses to add to the can
+- [x] Features and bonuses to add to the can
 - [x] Multiple players
 - [x] Multiple routes that diverge and converge
 - [x] Sound
-- [ ] Extreme mode, where collisions are more graphic
+- [x] Extreme mode, where collisions are more graphic

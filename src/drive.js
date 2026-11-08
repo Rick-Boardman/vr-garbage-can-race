@@ -12,6 +12,8 @@ import { CAN_RADIUS, FOOT_RADIUS, SHOULDER_REACH } from "./constants.js";
 
 const GRAVITY = 9.81;
 export const HARD_CRASH_SPEED = 9.5;
+const PLAIN_CAP = 24;
+const ROCKET_CAP = 30;
 const WALK_SPEED = 3.4;
 const STRAFE_SPEED = 3.1;
 const TURN_RATE = 3.4;
@@ -46,6 +48,10 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function kickHop(feature, amount) {
+  return feature === "spring" ? amount * 1.55 : amount;
+}
+
 export function createRideState(s = 0) {
   return {
     s,
@@ -64,6 +70,7 @@ export function createRideState(s = 0) {
     rollKick: 0,
     onShoulder: false,
     best: 0,
+    bonus: 0,
     hitCooldown: {},
     nearIds: {},
     eject: null,
@@ -435,7 +442,7 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
   state.latVel = 0;
 }
 
-export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0, sample, hazards, canSample = null }) {
+export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0, sample, hazards, canSample = null, feature = "none" }) {
   const step = clamp(Number(dt) || 0, 0, 0.05);
   if (!state.eject && jump) beginBail(state, Math.sign(steer) || 1);
   if (state.eject) {
@@ -457,13 +464,15 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
   accel -= 0.0062 * speed * speed;
   accel -= brake * (5.5 + speed * 0.7);
   if (onShoulder) accel -= 2.4 + speed * 0.4;
-  speed = clamp(speed + accel * step, 0, 24);
+  // The rocket pushes while the rider tucks. The plain cap stays 24.
+  if (feature === "rocket" && tuck > 0) accel += 7.5 * tuck;
+  speed = clamp(speed + accel * step, 0, feature === "rocket" ? ROCKET_CAP : PLAIN_CAP);
   // Gravity would roll a stopped can the moment the brake is released.
   // Stay stopped until a tuck or autowalk (throttle > 0) asks to go.
   if (throttle <= 0 && state.speed <= 0.45 && speed <= 0.45) speed = 0;
 
   if (!state.onShoulder && onShoulder) {
-    speed *= 0.9;
+    speed *= feature === "bumper" ? 0.97 : 0.9;
     state.bump = Math.max(state.bump, 0.4);
   }
 
@@ -474,11 +483,11 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
   if (offset > hard) {
     offset = hard;
     latVel = -Math.abs(latVel) * 0.35;
-    speed *= 0.92;
+    speed *= feature === "bumper" ? 0.97 : 0.92;
   } else if (offset < -hard) {
     offset = -hard;
     latVel = Math.abs(latVel) * 0.35;
-    speed *= 0.92;
+    speed *= feature === "bumper" ? 0.97 : 0.92;
   }
   const held = stayOnRoute(sample, offset, latVel, steer);
   offset = held.offset;
@@ -526,6 +535,7 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
         if (close && !state.nearIds[hazard.id]) {
           state.nearIds[hazard.id] = 1;
           state.nearMisses += 1;
+          state.bonus = (Number(state.bonus) || 0) + 15;
         }
         continue;
       }
@@ -534,7 +544,7 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
         speed *= 0.72;
         state.bump = 1;
         state.bumps += 1;
-        state.hopVy = Math.max(state.hopVy, 2.2);
+        state.hopVy = Math.max(state.hopVy, kickHop(feature, 2.2));
         state.hitCooldown[hazard.id] = 1.15;
         continue;
       }
@@ -572,7 +582,7 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
       if (hazard.kind === "person" || hazard.kind === "animal") {
         latVel += Math.sign(lateral || 1) * (hazard.kind === "animal" ? 1.8 : 1.05);
         speed = Math.max(speed * (hazard.kind === "animal" ? 0.84 : 0.92), 3.2);
-        state.hopVy = Math.max(state.hopVy, 3.4);
+        state.hopVy = Math.max(state.hopVy, kickHop(feature, 3.4));
         state.rollKick = clamp(state.rollKick + side * 5, -18, 18);
         state.events.push({
           type: "fell",
@@ -587,7 +597,7 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
         const slow = hazard.kind === "car" ? 0.58 : 0.84;
         // Repeated overlaps used to multiply speed down to zero and pin the can inside a car.
         speed = Math.max(speed * slow, 3.2);
-        state.hopVy = Math.max(state.hopVy, hazard.kind === "car" ? 6.5 : 3.4);
+        state.hopVy = Math.max(state.hopVy, kickHop(feature, hazard.kind === "car" ? 6.5 : 3.4));
         state.rollKick = clamp(state.rollKick + side * (hazard.kind === "car" ? 11 : 5), -18, 18);
       }
       state.crashes += 1;
@@ -622,6 +632,7 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
   }
   state.rollKick *= Math.exp(-1.6 * step);
   state.spin += (speed * 0.22 + state.rollKick) * step;
+  if (state.hop > 0.45) state.bonus = (Number(state.bonus) || 0) + 10 * step;
   state.bump = Math.max(0, state.bump - step * 1.5);
   state.onShoulder = Math.abs(offset) > soft;
   state.best = Math.max(state.best, state.s);
