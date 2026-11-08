@@ -377,6 +377,7 @@ player = boot.rig.player;
 hudSystem.setHelpOverrideLines([
   "In the can",
   "A and D steer. W or Shift goes faster. S brakes.",
+  "The road splits. Steer to one side. The two roads meet again.",
   "X toggles auto walk. Space hops out of the can.",
   "Drag looks around. N starts a new hill.",
   "",

@@ -7,7 +7,7 @@
 // face π/2, strafe +1 moves toward +z, which is -forward, so s decreases.
 // W walks along walkerForward.
 
-import { wrapAngle } from "./course.js";
+import { stayOnRoute, wrapAngle } from "./course.js";
 import { CAN_RADIUS, FOOT_RADIUS, SHOULDER_REACH } from "./constants.js";
 
 const GRAVITY = 9.81;
@@ -265,6 +265,9 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
     }
     if (eject.canSpeed < 0.2) eject.canSpeed = 0;
     if (Math.abs(eject.canLat) < 0.2) eject.canLat = 0;
+    const heldCan = stayOnRoute(coast, eject.canOffset, eject.canLat, 0);
+    eject.canOffset = heldCan.offset;
+    eject.canLat = heldCan.latVel;
   } else {
     eject.canSpeed = Math.max(0, eject.canSpeed || 0) * Math.exp(-0.2 * step);
     eject.canLat *= Math.exp(-0.35 * step);
@@ -477,6 +480,10 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
     latVel = Math.abs(latVel) * 0.35;
     speed *= 0.92;
   }
+  const held = stayOnRoute(sample, offset, latVel, steer);
+  offset = held.offset;
+  latVel = held.latVel;
+  if (held.bumped) state.bump = Math.max(state.bump, 0.35);
 
   let s = state.s + speed * step;
   const forward = horizontalForward(sample);
@@ -589,6 +596,9 @@ export function stepRide(state, { dt, steer, throttle, jump = false, strafe = 0,
     }
   }
   latVel = clamp(latVel, -8, 8);
+  const heldAgain = stayOnRoute(sample, offset, latVel, steer);
+  offset = heldAgain.offset;
+  latVel = heldAgain.latVel;
 
   if (state.eject) {
     state.s = state.eject.bodyS;

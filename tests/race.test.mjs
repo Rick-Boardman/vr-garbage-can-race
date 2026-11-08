@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { createCourse, checkCourseFrame, frameFromTangent, headingYaw, sampleCourse, wrapAngle } from "../src/course.js";
+import { carriageCenter, createCourse, checkCourseFrame, forkAt, frameFromTangent, headingYaw, holdCarriage, sampleCourse, stayOnRoute, wrapAngle } from "../src/course.js";
 import { checkRibbonFacesUp } from "../src/road.js";
 import { applyFrame } from "../src/frame.js";
 import {
@@ -71,6 +71,110 @@ test("the hill drops and the frame stays right-handed", () => {
   const again = sampleCourse(createCourse(7), 80);
   assert.ok(Math.abs(again.x - later.x) < 1e-6);
   assert.ok(Math.abs(again.z - later.z) < 1e-6);
+});
+
+test("routes diverge and then meet again", () => {
+  const course = createCourse(7);
+  const forks = [];
+  let open = null;
+  for (let s = 0; s < 1800; s += 2) {
+    const fork = forkAt(course, s);
+    const on = fork.median > 0.05;
+    if (on && !open) open = { index: fork.index, start: s, peak: fork.median, peakS: s };
+    if (on && open) {
+      if (fork.median >= open.peak) {
+        open.peak = fork.median;
+        open.peakS = s;
+      }
+    }
+    if (!on && open) {
+      open.end = s;
+      forks.push(open);
+      open = null;
+    }
+  }
+  assert.ok(forks.length >= 3, `expected several forks, saw ${forks.length}`);
+  for (const fork of forks) {
+    assert.equal(forkAt(course, fork.start - 4).median, 0);
+    assert.ok(forkAt(course, fork.end).median < 0.05);
+    assert.ok(fork.peak > 1.4, `fork ${fork.index} peak ${fork.peak}`);
+    const at = sampleCourse(course, fork.peakS);
+    const road = at.halfWidth - at.fork.median;
+    assert.ok(at.fork.split > 0.95, `peak split ${at.fork.split}`);
+    assert.ok(road >= 10.6 && road <= 16.2, `full road ${road}`);
+    const mid = (at.fork.median + at.halfWidth) / 2;
+    assert.ok(Math.abs(carriageCenter(at, 1) - mid) < 0.2, `right lane ${carriageCenter(at, 1)} mid ${mid}`);
+    assert.equal(at.fork.index, fork.index);
+    assert.ok(Math.abs(at.right.y) < 1e-4);
+    const left = carriageCenter(at, -1);
+    const right = carriageCenter(at, 1);
+    assert.ok(left < -at.fork.median);
+    assert.ok(right > at.fork.median);
+    assert.ok(holdCarriage(at, 0, 1) > at.fork.median);
+    assert.ok(holdCarriage(at, 0, -1) < -at.fork.median);
+    const again = forkAt(createCourse(7), fork.peakS);
+    assert.ok(Math.abs(again.median - fork.peak) < 1e-6);
+  }
+  for (let i = 1; i < forks.length; i += 1) {
+    assert.ok(forks[i].start > forks[i - 1].end);
+    assert.ok(forks[i].index !== forks[i - 1].index);
+  }
+
+  const nose = stayOnRoute({ fork: { median: 1.2, split: 1 }, halfWidth: 6 }, 0, 0, -1);
+  assert.ok(nose.offset < -1);
+  const rightNose = stayOnRoute({ fork: { median: 1.2, split: 1 }, halfWidth: 6 }, 0, 0, 0);
+  assert.ok(rightNose.offset > 1);
+  const plain = stayOnRoute({ fork: { median: 0, split: 0 }, halfWidth: 6 }, 0.2, 0.4, 0);
+  assert.equal(plain.offset, 0.2);
+
+  const peak = forks[0];
+  const leftRide = createRideState(peak.peakS - 24);
+  leftRide.offset = -1;
+  leftRide.speed = 14;
+  let leftSeen = null;
+  for (let guard = 0; guard < 80 && leftRide.s < peak.peakS + 8; guard += 1) {
+    stepRide(leftRide, {
+      dt: 0.05,
+      steer: -1,
+      throttle: 1,
+      sample: sampleCourse(course, leftRide.s),
+      hazards: [],
+    });
+    const here = sampleCourse(course, leftRide.s);
+    if (here.fork.median > 1) {
+      assert.ok(leftRide.offset < -here.fork.median, `left road ${leftRide.offset} median ${here.fork.median}`);
+      leftSeen = leftRide.offset;
+    }
+  }
+  assert.ok(leftSeen < 0);
+
+  const rightRide = createRideState(peak.peakS - 30);
+  rightRide.offset = 0;
+  rightRide.speed = 16;
+  let rightSeen = null;
+  for (let guard = 0; guard < 90 && rightRide.s < peak.peakS + 8; guard += 1) {
+    stepRide(rightRide, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 1,
+      sample: sampleCourse(course, rightRide.s),
+      hazards: [],
+    });
+    const here = sampleCourse(course, rightRide.s);
+    if (here.fork.median > 1) {
+      assert.ok(rightRide.offset > here.fork.median, `right road ${rightRide.offset} median ${here.fork.median}`);
+      rightSeen = rightRide.offset;
+    }
+  }
+  assert.ok(rightSeen > 0);
+
+  const joined = sampleCourse(course, peak.end + 20);
+  assert.equal(joined.fork.median, 0);
+  const home = createRideState(joined.s);
+  home.offset = 0.15;
+  home.speed = 8;
+  stepRide(home, { dt: 0.05, steer: 0, throttle: 1, sample: joined, hazards: [] });
+  assert.ok(Math.abs(home.offset) < 0.5);
 });
 
 test("road ribbons face up on the flat and on a slope", () => {

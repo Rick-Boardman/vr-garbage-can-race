@@ -111,15 +111,88 @@ export function gradeAt(course, s) {
   return clamp(base + wobble, 0.045, 0.22);
 }
 
-export function halfWidthAt(course, s) {
+function baseHalfWidthAt(course, s) {
   const { current, next, t } = blendDistricts(course, s);
   return current.halfWidth + (next.halfWidth - current.halfWidth) * t;
+}
+
+export function halfWidthAt(course, s) {
+  const base = baseHalfWidthAt(course, s);
+  const fork = forkAt(course, s);
+  // A single road runs from -base to +base. Each branch is that full width,
+  // so the outer edge grows by one more half-width plus the median.
+  return base * (1 + fork.split) + fork.median;
 }
 
 function curvatureAt(course, s) {
   const district = districtAt(course, s);
   const ramp = s < 22 ? Math.max(0, s) / 22 : 1;
   return Math.sin(s * district.curveFreq + district.phase) * district.curveAmp * ramp;
+}
+
+// Forks share the centerline. s is the same on both roads, so they meet
+// again when the median closes. Median is meters from the center along
+// sample.right. Positive offset is the right-hand road.
+const FORK_LEAD = 110;
+const FORK_LENGTH = 156;
+const FORK_EVERY = 420;
+
+function forkRoll(seed, index) {
+  return mulberry32((seed ^ Math.imul(index + 1, 0x9e3779b9)) >>> 0)();
+}
+
+export function forkAt(course, s) {
+  const none = { index: -1, median: 0, split: 0 };
+  const distance = Math.max(0, s || 0);
+  if (distance < FORK_LEAD) return none;
+  const along = distance - FORK_LEAD;
+  const index = Math.floor(along / FORK_EVERY);
+  const local = along - index * FORK_EVERY;
+  if (local > FORK_LENGTH) return none;
+  const split = Math.sin(Math.PI * (local / FORK_LENGTH));
+  const peak = 4.4 + 1.2 * forkRoll(course.seed, index);
+  return { index, median: split * peak, split };
+}
+
+// Lane centers sit at ±0.36 of the half-width on one road. On a fork they
+// slide out to the middle of each carriageway as the grass opens.
+export function carriageCenter(sample, side) {
+  const sign = side >= 0 ? 1 : -1;
+  const half = sample?.halfWidth || 0;
+  const plain = sign * half * 0.36;
+  const median = sample?.fork?.median || 0;
+  const split = sample?.fork?.split || 0;
+  if (median < 0.05 || split < 0.05) return plain;
+  const forked = sign * (median + half) * 0.5;
+  return plain + (forked - plain) * Math.min(1, split);
+}
+
+// Keep a vehicle on the asphalt of the side it already chose.
+export function holdCarriage(sample, offset, side) {
+  const median = sample?.fork?.median || 0;
+  const split = sample?.fork?.split || 0;
+  if (median < 0.05 || split < 0.05) return offset;
+  const sign = side >= 0 ? 1 : -1;
+  const blend = Math.min(1, split);
+  const inner = median + 0.55 * blend;
+  const outer = Math.max(inner + 0.4, (sample.halfWidth || inner) - 1.05);
+  return sign * Math.min(Math.max(Math.abs(offset), inner), outer);
+}
+
+// The grass is a wedge. A can in it is set on the side it is already
+// heading. No steer and no offset takes the right-hand road.
+export function stayOnRoute(sample, offset, latVel, steer) {
+  const median = sample?.fork?.median || 0;
+  const split = sample?.fork?.split || 0;
+  if (median < 0.02) return { offset, latVel, bumped: false };
+  const curb = median + 0.5 * split;
+  if (Math.abs(offset) >= curb) return { offset, latVel, bumped: false };
+  const side = Math.sign(offset) || Math.sign(latVel) || Math.sign(steer) || 1;
+  let nextLat = latVel;
+  if (side > 0 && nextLat < 0) nextLat = 0;
+  if (side < 0 && nextLat > 0) nextLat = 0;
+  const next = side * curb;
+  return { offset: next, latVel: nextLat, bumped: Math.abs(next - offset) > 0.45 };
 }
 
 function ensureSamples(course, sMax) {
@@ -202,6 +275,7 @@ export function sampleCourse(course, s) {
     up: frame.up,
     slope: grade,
     halfWidth: halfWidthAt(course, distance),
+    fork: forkAt(course, distance),
     theme: district.theme,
     time: district.time,
     name: district.name,

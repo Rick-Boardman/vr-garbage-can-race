@@ -3,7 +3,7 @@
 
 import * as THREE from "three";
 import { applyFrame } from "./frame.js";
-import { frameFromTangent, sampleCourse, wrapAngle } from "./course.js";
+import { carriageCenter, frameFromTangent, holdCarriage, sampleCourse, wrapAngle } from "./course.js";
 import { edgesAlong, ribbonGeometry } from "./road.js";
 import { restCanTilt } from "./drive.js";
 import { SITTER, animatePerson, createFlop, isStepping, poseForTravel, stepFlop } from "./props.js";
@@ -760,7 +760,40 @@ export function createTown(THREE, scene, materials, props) {
     const samples = [];
     for (let s = s0; s <= s1; s += 2) samples.push(sampleCourse(course, s));
 
-    addRibbon(root, samples, (sample) => -sample.halfWidth, (sample) => sample.halfWidth, 0, asphalt);
+    const forked = samples.some((sample) => (sample.fork?.median || 0) > 0.05);
+    if (forked) {
+      // Two carriageways share this centerline. The grass between them
+      // closes again at both ends of the fork.
+      addRibbon(root, samples, (sample) => -sample.halfWidth, (sample) => -(sample.fork?.median || 0), 0, asphalt);
+      addRibbon(root, samples, (sample) => sample.fork?.median || 0, (sample) => sample.halfWidth, 0, asphalt);
+      addRibbon(
+        root,
+        samples,
+        (sample) => -(sample.fork?.median || 0),
+        (sample) => sample.fork?.median || 0,
+        0.06,
+        grassMat,
+      );
+      addRibbon(
+        root,
+        samples,
+        (sample) => -((sample.fork?.median || 0) + 0.16),
+        (sample) => -((sample.fork?.median || 0) + 0.02),
+        0.07,
+        white,
+      );
+      addRibbon(
+        root,
+        samples,
+        (sample) => (sample.fork?.median || 0) + 0.02,
+        (sample) => (sample.fork?.median || 0) + 0.16,
+        0.07,
+        white,
+      );
+    } else {
+      addRibbon(root, samples, (sample) => -sample.halfWidth, (sample) => sample.halfWidth, 0, asphalt);
+      addRibbon(root, samples, -0.08, 0.08, 0.025, yellow);
+    }
     for (const side of [-1, 1]) {
       // Left vertex is the more negative offset so the normal stays +Y.
       const span = (inner, outer) => ({
@@ -793,14 +826,23 @@ export function createTown(THREE, scene, materials, props) {
         addRibbon(root, samples, sea.left, sea.right, -0.08, waterMat);
       }
     }
-    addRibbon(root, samples, -0.08, 0.08, 0.025, yellow);
-
     const actors = [];
     const staticHazards = [];
     const benches = [];
     const solids = [];
     let serial = 0;
     const nextId = (kind) => `${kind}-${index}-${serial++}`;
+
+    // A hazard rolled into the grass is moved onto the nearer carriageway.
+    function pullOntoAsphalt(sample, offset) {
+      const median = sample.fork?.median || 0;
+      const split = sample.fork?.split || 0;
+      if (median < 0.2 || split < 0.05) return offset;
+      const side = Math.sign(offset) || 1;
+      const inner = median + 0.45 * Math.min(1, split);
+      const outer = Math.max(inner, sample.halfWidth - 0.5);
+      return side * Math.min(Math.max(Math.abs(offset), inner), outer);
+    }
 
     function boxHazard(id, kind, sample, offset, frame, halfL, halfW, extra = {}) {
       staticHazards.push({
@@ -975,7 +1017,10 @@ export function createTown(THREE, scene, materials, props) {
       const sample = sampleCourse(course, s + 1);
       for (const side of [-1, 1]) {
         const dash = mark(0.16, 0.03, 2.3, white);
-        place(root, dash, sample, side * sample.halfWidth * 0.32, 0.03, sample);
+        const dashAt = (sample.fork?.median || 0) > 0.2
+          ? carriageCenter(sample, side)
+          : side * sample.halfWidth * 0.32;
+        place(root, dash, sample, dashAt, 0.03, sample);
       }
     }
 
@@ -984,7 +1029,7 @@ export function createTown(THREE, scene, materials, props) {
     const crossA = sampleCourse(course, crossS);
     const crossB = sampleCourse(course, crossS + 4.2);
     const bend = Math.abs(wrapAngle(crossA.psi - crossB.psi));
-    if (theme !== "country" && theme !== "forest" && bend < 0.12 && Math.abs(crossS - START_S) > 14) {
+    if (theme !== "country" && theme !== "forest" && bend < 0.12 && Math.abs(crossS - START_S) > 14 && (crossA.fork?.median || 0) < 0.3) {
       for (let stripe = 0; stripe < 4; stripe += 1) {
         const sample = sampleCourse(course, crossS + stripe * 1.05);
         for (const side of [-1, 1]) {
@@ -1015,7 +1060,7 @@ export function createTown(THREE, scene, materials, props) {
     for (let s = s0 + 18; s < s1; s += 36) {
       if (s < START_S + 16 || rand() > 0.32) continue;
       const sample = sampleCourse(course, s);
-      const offset = (rand() - 0.5) * sample.halfWidth * 0.85;
+      const offset = pullOntoAsphalt(sample, (rand() - 0.5) * sample.halfWidth * 0.85);
       const hole = props.createPothole(rand);
       props.bake(hole);
       place(root, hole, sample, offset, 0, sample);
@@ -1025,7 +1070,7 @@ export function createTown(THREE, scene, materials, props) {
     for (let s = s0 + 18; s < s1; s += 22) {
       if (s < START_S + 20 || rand() > 0.55) continue;
       const sample = sampleCourse(course, s);
-      const offset = (rand() - 0.5) * sample.halfWidth * 0.7;
+      const offset = pullOntoAsphalt(sample, (rand() - 0.5) * sample.halfWidth * 0.7);
       const slick = props.createSlick(rand);
       place(root, slick, sample, offset, 0, sample);
       circleHazard(nextId("slick"), "slick", sample, offset, slick.userData.radius || 1.7, { slip: rand() > 0.5 ? 1 : -1 });
@@ -1034,7 +1079,7 @@ export function createTown(THREE, scene, materials, props) {
     for (let s = s0 + 20; s < s1; s += 24) {
       if (s < START_S + 22 || rand() > 0.5) continue;
       const sample = sampleCourse(course, s);
-      const offset = (rand() > 0.5 ? 1 : -1) * (sample.halfWidth * 0.45);
+      const offset = pullOntoAsphalt(sample, (rand() > 0.5 ? 1 : -1) * (sample.halfWidth * 0.45));
       const kind = rand() > 0.5 ? "cone" : "crate";
       const prop = kind === "cone" ? props.createCone() : props.createCrate(rand);
       place(root, prop, sample, offset, 0, upright(sample, 1));
@@ -1823,7 +1868,10 @@ export function createTown(THREE, scene, materials, props) {
     const carBlocks = parkedBlocks.slice();
     for (const car of cars) {
       const sample = sampleCourse(course, Math.max(0, car.s));
-      let laneOffset = car.lane * sample.halfWidth;
+      const routeSide = Math.sign(car.lane) || 1;
+      let laneOffset = (sample.fork?.median || 0) > 0.05
+        ? carriageCenter(sample, routeSide)
+        : car.lane * sample.halfWidth;
       if (car.stopPull && !car.wreck) {
         const curb = car.stopPull * (sample.halfWidth - Math.max(1.7, (car.halfW || 0.95) + 0.5));
         laneOffset += (curb - laneOffset) * 0.7;
@@ -1891,9 +1939,10 @@ export function createTown(THREE, scene, materials, props) {
         car.bias = clampBusBias(laneOffset, car.bias, sample.halfWidth);
       }
       const limit = Math.max(0.3, sample.halfWidth - 1.3);
-      const offset = car.wreck
+      let offset = car.wreck
         ? clampOffset(laneOffset + (car.wreck.shift || 0), limit)
         : clampOffset(laneOffset + car.bias, limit);
+      if (!car.wreck) offset = holdCarriage(sample, offset, routeSide);
       if (!car.wreck) car.bias = offset - laneOffset;
       car.offset = offset;
       car.laneOffset = laneOffset;
