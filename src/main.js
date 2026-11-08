@@ -15,6 +15,7 @@ import {
   easePose,
   holdAtLine,
   playBase,
+  playSite,
   poseOf,
   wantsSolo,
   separatePack,
@@ -125,7 +126,10 @@ let namePublish = 0;
 const remoteRides = new Map();
 const sticksByActor = new Map();
 const shownSnapshot = new Map();
-const partyClient = createPartyClient({ base: playBase(window.location.search) });
+const partyClient = createPartyClient({
+  base: playBase(window.location.search),
+  site: playSite(window.location.hostname),
+});
 const lobby = createLobby({
   canHost: canHostDevice(deviceFacts()),
   onHost: (name, slots) => { void beginHost(name, slots); },

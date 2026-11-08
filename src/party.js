@@ -26,6 +26,18 @@ export function playBase(search = "") {
   return String(raw).replace(/\/$/, "");
 }
 
+// API Gateway never sees the visitor's Host, so a page on NetCiv has to name
+// the tenant. A local page leaves this blank and stays on the local play site.
+export function playSite(hostname = "") {
+  const host = String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, "")
+    .replace(/\.$/, "");
+  if (host === "netciv.com" || host === "www.netciv.com") return "netciv";
+  return "";
+}
+
 // The homepage Solo Play button opens the hill already rolling. The plain
 // address, and an explicit solo=0, stay on the lobby for Multiplayer.
 export function wantsSolo(search = "") {

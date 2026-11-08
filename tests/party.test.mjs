@@ -10,6 +10,7 @@ import {
   createPartyClient,
   easePose,
   holdAtLine,
+  playSite,
   poseOf,
   SLOT_LOOKS,
   separatePack,
@@ -643,6 +644,25 @@ test("a name has to be filled in and free in this session", () => {
   assert.equal(nameBlock(" ada ", people, "guest:me"), "That name is already in use.");
   assert.equal(nameBlock("Ada", [{ actor: "guest:me", displayName: "Ada" }], "guest:me"), "");
   assert.equal(nameBlock("Bea", people, "guest:me"), "");
+});
+
+test("a netciv page names the netciv play site", async () => {
+  assert.equal(playSite("www.netciv.com"), "netciv");
+  assert.equal(playSite("netciv.com"), "netciv");
+  assert.equal(playSite("WWW.NETCIV.COM:443"), "netciv");
+  assert.equal(playSite("127.0.0.1"), "");
+  assert.equal(playSite("localhost"), "");
+  const calls = [];
+  const client = createPartyClient({
+    site: playSite("www.netciv.com"),
+    fetch: async (_url, init) => {
+      calls.push(init?.headers?.["x-magna-site"] || "");
+      return { ok: true, status: 200, text: async () => JSON.stringify({ kind: "guest", actor: "guest:a", people: [], games: [] }) };
+    },
+  });
+  await client.publishName("Ada");
+  assert.ok(calls.length >= 1);
+  assert.ok(calls.every((site) => site === "netciv"));
 });
 
 test("a blank name is published blank and cannot chat", async () => {
