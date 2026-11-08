@@ -308,6 +308,15 @@ let daylight = null;
 let player = null;
 let navigation = null;
 let renderer = null;
+let enterVrSupported = false;
+
+function syncEnterVrButton() {
+  const button = document.getElementById("enter-vr");
+  if (!button) return;
+  const lobby = document.getElementById("lobby");
+  const inLobby = !!lobby && !lobby.hidden;
+  button.hidden = !enterVrSupported || !!renderer?.xr?.isPresenting || !inLobby;
+}
 let controllers = null;
 
 const sound = createSound();
@@ -395,6 +404,19 @@ api.audio = () => sound.status();
 const { scene, camera } = boot;
 hudSystem = boot.hudSystem;
 player = boot.rig.player;
+const enterVrButton = document.getElementById("enter-vr");
+if (enterVrButton) {
+  enterVrButton.addEventListener("click", () => {
+    void hudSystem.enterVR?.();
+  });
+  const vrCheck = navigator.xr?.isSessionSupported?.("immersive-vr");
+  if (vrCheck) {
+    vrCheck.then((supported) => {
+      enterVrSupported = !!supported;
+      syncEnterVrButton();
+    }).catch(() => {});
+  }
+}
 
 hudSystem.setHelpOverrideLines([
   "In the can",
@@ -414,6 +436,7 @@ hudSystem.setHelpOverrideLines([
   "2 looks from behind the can. 3 looks from farther back.",
   "",
   "Headset",
+  "Enter VR is the button at the top right.",
   "Lower the left controller to steer left, the right to steer right.",
   "Lower both controllers to speed up. Raise them to lean back and brake.",
   "",
@@ -1592,6 +1615,7 @@ function noteExtremeHit() {
 }
 
 function tickBody(dt) {
+  syncEnterVrButton();
   const step = Math.min(Math.max(dt || 0, 0), 0.05);
   elapsed += step;
   noteHostSilence();
