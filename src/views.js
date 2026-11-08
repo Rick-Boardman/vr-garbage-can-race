@@ -88,6 +88,9 @@ export function vrPresentRig(anchor, heading, poseYaw, viewPitch, posePosition) 
   _actual.copy(_poseV).applyQuaternion(_qCancel).applyQuaternion(_qPitch).applyQuaternion(_qYaw);
   return {
     rigYaw: face - yaw,
+    // The HUD is parented to the yaw node. This yaw turns the slab back
+    // toward the headset, so the panels stay in front of the picture.
+    hudYaw: yaw,
     headX: _headQ.x,
     headY: _headQ.y,
     headZ: _headQ.z,

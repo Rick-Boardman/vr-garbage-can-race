@@ -44,7 +44,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { layoutVrChrome } from "./vr-chrome.js";
+import { keepVrPanelsOnSlab } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -109,7 +109,6 @@ let viewIndex = viewIndexFor(viewParam);
 let vrSeatEye = null;
 let vrChromeOn = false;
 let vrDesktop = null;
-let vrHelpWanted = false;
 const stickLocks = new WeakMap();
 let head = null;
 let lastHeading = null;
@@ -387,10 +386,7 @@ const boot = createSceneHudBootstrap({
       else if (index === HOTBAR.course) pressNew();
       else if (index === HOTBAR.settings) toggleGraphics();
       else if (index === HOTBAR.style) lobby.toggleStyle();
-      else if (index === HOTBAR.help) {
-        if (renderer?.xr?.isPresenting) vrHelpWanted = !helpOpen();
-        hudSystem?.toggleHelp();
-      }
+      else if (index === HOTBAR.help) hudSystem?.toggleHelp();
       else if (index === HOTBAR.start) {
         if (gate === "waiting" && partyMode === "host") void beginSeal();
       } else if (index === HOTBAR.leave) {
@@ -558,15 +554,12 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  const ui = hudSystem?.hud?.ui;
-  // Halo grids every open panel across the headset. That covers the road.
-  if (ui) ui._vrAutoLayoutDone = true;
-  layoutVrChrome({
-    windows: ui?.windows,
+  // Leave Halo's VR auto-layout alone. It puts open panels on the slab.
+  // Pull any that land outside that slab back into view.
+  keepVrPanelsOnSlab({
+    windows: hudSystem?.hud?.ui?.windows,
     layoutW: HUD_LAYOUT_DEFAULT_WIDTH_PX,
     layoutH: HUD_LAYOUT_DEFAULT_HEIGHT_PX,
-    helpWanted: vrHelpWanted,
-    settingsWanted,
   });
 }
 function captureVrDesktop() {
@@ -859,11 +852,14 @@ function placeWorld(presenting) {
       poseP,
     );
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
+    const hudRoot = hudSystem?.hud?.root;
+    if (hudRoot) hudRoot.rotation.set(0, placed.hudYaw, 0);
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
   } else {
+    if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
     if (head) head.rotation.set(0, 0, 0);
     player.position.set(followX, posed.y + shoulder + view.pivot + viewHop, followZ);
     const kickScale = readExtreme() ? 0.35 : 0.012;
@@ -1752,12 +1748,10 @@ function tickBody(dt) {
   const presentingEarly = !!renderer.xr?.isPresenting;
   if (presentingEarly && !vrChromeOn) {
     captureVrDesktop();
-    vrHelpWanted = false;
     vrChromeOn = true;
   } else if (!presentingEarly && vrChromeOn) {
     restoreVrDesktop();
     vrChromeOn = false;
-    vrHelpWanted = false;
   }
   if (presentingEarly) holdVrPanels();
   const step = Math.min(Math.max(dt || 0, 0), 0.05);

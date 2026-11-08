@@ -231,6 +231,19 @@ test("a headset turned around in the room still looks down the road", () => {
         .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), posePitch))
         .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.15));
       expected.set(0, 0, -1).applyQuaternion(look);
+      const hud = new THREE.Group();
+      pitchNode.add(hud);
+      hud.rotation.set(0, placed.hudYaw, 0);
+      const hudDir = new THREE.Vector3();
+      hud.getWorldDirection(hudDir).negate();
+      const camDir = new THREE.Vector3();
+      cam.getWorldDirection(camDir);
+      const hudFlat = Math.hypot(hudDir.x, hudDir.z) || 1;
+      const camFlat = Math.hypot(camDir.x, camDir.z) || 1;
+      const slab = (hudDir.x / hudFlat) * (camDir.x / camFlat) + (hudDir.z / hudFlat) * (camDir.z / camFlat);
+      assert.ok(slab > 0.99, `slab left the view ${slab} at yaw ${turned}`);
+      hud.removeFromParent();
+
       const dir = new THREE.Vector3();
       cam.getWorldDirection(dir);
       const align = dir.dot(expected);

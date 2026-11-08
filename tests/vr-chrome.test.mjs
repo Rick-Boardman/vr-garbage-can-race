@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { layoutVrChrome, VR_PARK_Y } from "../src/vr-chrome.js";
+import { keepVrPanelsOnSlab } from "../src/vr-chrome.js";
 
 function windows() {
   return {
@@ -10,46 +10,25 @@ function windows() {
     "race-chat": { x: 448, y: 16, w: 360, h: 260 },
     debug: { x: 2000, y: 150, w: 420, h: 360 },
     status: { x: 360, y: 16, w: 330, h: 64 },
-    settings: { x: 200, y: 100, w: 440, h: 520 },
+    settings: { x: 200, y: -2000, w: 440, h: 520 },
     hotbar: { x: 2000, y: -10, w: 540, h: 84 },
     xr: { x: 400, y: 200, w: 300, h: 136 },
   };
 }
 
-function covers(win, x, y) {
-  return x >= win.x && x <= win.x + win.w && y >= win.y && y <= win.y + win.h;
+function onSlab(win, width, height) {
+  return win.x >= 0 && win.y >= 0 && win.x + win.w <= width && win.y + win.h <= height;
 }
 
-test("VR chrome parks the readouts and leaves the center clear", () => {
+test("open VR panels stay on the slab and a hidden one stays hidden", () => {
   const hud = windows();
-  layoutVrChrome({
-    windows: hud,
-    layoutW: 1024,
-    layoutH: 640,
-    helpWanted: false,
-    settingsWanted: false,
-  });
-  for (const key of ["race", "help", "race-chat", "debug", "status", "settings"]) {
-    assert.equal(hud[key].y, VR_PARK_Y, key);
+  keepVrPanelsOnSlab({ windows: hud, layoutW: 1024, layoutH: 640 });
+  for (const key of ["race", "help", "race-chat", "debug", "status", "hotbar", "xr"]) {
+    assert.ok(onSlab(hud[key], 1024, 640), `${key} at ${hud[key].x},${hud[key].y}`);
   }
-  const bar = hud.hotbar;
-  const xr = hud.xr;
-  assert.ok(bar.x >= 0 && bar.x + bar.w <= 1024, `hotbar x ${bar.x}`);
-  assert.ok(bar.y > 640 * 0.7, `hotbar y ${bar.y}`);
-  assert.ok(bar.y + bar.h <= 640);
-  assert.ok(xr.x > 1024 * 0.5, `exit x ${xr.x}`);
-  assert.ok(xr.y + xr.h <= bar.y, `exit overlaps the hotbar (${xr.y + xr.h} vs ${bar.y})`);
-  assert.equal(covers(bar, 512, 320), false);
-  assert.equal(covers(xr, 512, 320), false);
-
-  hud.help.y = 40;
-  layoutVrChrome({
-    windows: hud,
-    layoutW: 1024,
-    layoutH: 640,
-    helpWanted: true,
-    settingsWanted: false,
-  });
-  assert.equal(hud.help.y, 40);
-  assert.equal(hud.race.y, VR_PARK_Y);
+  assert.equal(hud.settings.y, -2000);
+  assert.equal(hud.race.x, 16);
+  assert.equal(hud.race.y, 16);
+  assert.ok(hud.hotbar.x + hud.hotbar.w <= 1024, `hotbar x ${hud.hotbar.x}`);
+  assert.ok(hud.hotbar.y >= 0, `hotbar y ${hud.hotbar.y}`);
 });
