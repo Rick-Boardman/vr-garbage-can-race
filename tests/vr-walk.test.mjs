@@ -13,6 +13,7 @@ import {
   vrJumpDown,
   vrStickPair,
 } from "../src/input.js";
+import { VR_SIDE_YAW } from "../src/vr-chrome.js";
 import { VIEWS, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
@@ -231,18 +232,6 @@ test("a headset turned around in the room still looks down the road", () => {
         .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), posePitch))
         .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.15));
       expected.set(0, 0, -1).applyQuaternion(look);
-      const hud = new THREE.Group();
-      pitchNode.add(hud);
-      hud.rotation.set(0, placed.hudYaw, 0);
-      const hudDir = new THREE.Vector3();
-      hud.getWorldDirection(hudDir).negate();
-      const camDir = new THREE.Vector3();
-      cam.getWorldDirection(camDir);
-      const hudFlat = Math.hypot(hudDir.x, hudDir.z) || 1;
-      const camFlat = Math.hypot(camDir.x, camDir.z) || 1;
-      const slab = (hudDir.x / hudFlat) * (camDir.x / camFlat) + (hudDir.z / hudFlat) * (camDir.z / camFlat);
-      assert.ok(slab > 0.99, `slab left the view ${slab} at yaw ${turned}`);
-      hud.removeFromParent();
 
       const dir = new THREE.Vector3();
       cam.getWorldDirection(dir);
@@ -258,4 +247,35 @@ test("a headset turned around in the room still looks down the road", () => {
     }
   }
   assert.ok(eye.y < anchor.y + posePos.y, "the downward pitch does not lift the eye into the hill");
+
+  // The HUD root stays at yaw 0. Looking forward leaves a side panel out of
+  // the picture. Turning the head to that panel brings it in front of the eyes.
+  const hud = new THREE.Group();
+  const panel = new THREE.Group();
+  pitchNode.add(hud);
+  hud.add(panel);
+  hud.rotation.set(0, 0, 0);
+  panel.rotation.set(0, VR_SIDE_YAW, 0);
+  function sideDot(turned) {
+    const pose = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, turned, 0, "YXZ"));
+    const py = referenceYaw(pose.x, pose.y, pose.z, pose.w);
+    const placed = vrPresentRig(anchor, heading, py, viewPitch, posePos);
+    yawNode.rotation.set(0, placed.rigYaw, 0);
+    head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
+    cam.quaternion.copy(pose);
+    player.position.set(placed.x, placed.y, placed.z);
+    player.updateMatrixWorld(true);
+    const panelDir = new THREE.Vector3();
+    panel.getWorldDirection(panelDir).negate();
+    const camDir = new THREE.Vector3();
+    cam.getWorldDirection(camDir);
+    const panelFlat = Math.hypot(panelDir.x, panelDir.z) || 1;
+    const camFlat = Math.hypot(camDir.x, camDir.z) || 1;
+    return (panelDir.x / panelFlat) * (camDir.x / camFlat) + (panelDir.z / panelFlat) * (camDir.z / camFlat);
+  }
+  const ahead = sideDot(0);
+  const toward = sideDot(VR_SIDE_YAW);
+  assert.ok(ahead < 0.45, `side panel is in the face ${ahead}`);
+  assert.ok(toward > 0.99, `looking aside missed the panel ${toward}`);
+  hud.removeFromParent();
 });

@@ -5,7 +5,9 @@ import {
   HUD_VR_DISTANCE_M,
   HUD_VR_SURFACE_WIDTH_M,
 } from "../node_modules/@rb/halo/src/hud-placement-policy.js";
-import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "../src/vr-chrome.js";
+import { stageVrPanels, VR_LAYOUT_H } from "../src/vr-chrome.js";
+
+const LAYOUT_W = 1024;
 
 function windows() {
   return {
@@ -16,7 +18,7 @@ function windows() {
     status: { x: 360, y: -2000, w: 330, h: 64 },
     settings: { x: 200, y: -2000, w: 440, h: 520 },
     hotbar: { x: 2000, y: -10, w: 540, h: 84 },
-    xr: { x: 400, y: 200, w: 300, h: 136 },
+    xr: { x: 2000, y: -2000, w: 300, h: 136 },
   };
 }
 
@@ -24,47 +26,51 @@ function yawSpan() {
   return 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
 }
 
-// Halo maps a window center onto the sphere, then the panel extends sideways.
 function yawEdges(win) {
   const span = yawSpan();
   const cx = win.x + win.w / 2;
-  const yaw = (cx / VR_LAYOUT_W - 0.5) * span;
+  const yaw = (cx / LAYOUT_W - 0.5) * span;
   const half = Math.atan(
-    (win.w * 0.5 * HUD_VR_SURFACE_WIDTH_M) / VR_LAYOUT_W / HUD_VR_DISTANCE_M,
+    (win.w * 0.5 * HUD_VR_SURFACE_WIDTH_M) / LAYOUT_W / HUD_VR_DISTANCE_M,
   );
   return [yaw - half, yaw + half];
 }
 
-test("open VR panels sit beside the road and a hidden one stays hidden", () => {
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+test("readouts leave the road and Exit VR stays where the laser can hit it", () => {
   const hud = windows();
-  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
+  stageVrPanels({ windows: hud, layoutW: LAYOUT_W, layoutH: VR_LAYOUT_H });
 
   assert.equal(hud.settings.y, -2000);
   assert.equal(hud.debug.y, -2000);
   assert.equal(hud.status.y, -2000);
 
-  const clear = 12 * Math.PI / 180;
-  for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) {
-    const win = hud[key];
-    assert.ok(win.y >= 32, `${key} y ${win.y}`);
-    assert.ok(win.y + win.h <= VR_LAYOUT_H, `${key} runs off the bottom`);
-    const [left, right] = yawEdges(win);
-    const coversCenter = right > -clear && left < clear;
-    assert.equal(coversCenter, false, `${key} covers the road (${left.toFixed(3)}, ${right.toFixed(3)})`);
+  const aside = 50 * Math.PI / 180;
+  for (const key of ["race", "help", "race-chat", "hotbar"]) {
+    const [left, right] = yawEdges(hud[key]);
+    const inFront = right > -aside && left < aside;
+    assert.equal(inFront, false, `${key} is in the face (${left.toFixed(3)}, ${right.toFixed(3)})`);
   }
 
-  assert.ok(hud.race.x < hud.xr.x, "status is left of Exit VR");
-  assert.ok(hud.hotbar.x + hud.hotbar.w < VR_LAYOUT_W * 0.5, "hotbar stays on the left");
-  assert.ok(hud.xr.x > VR_LAYOUT_W * 0.5, "Exit VR stays on the right");
+  const [exitLeft, exitRight] = yawEdges(hud.xr);
+  assert.ok(exitLeft > 12 * Math.PI / 180, `Exit VR covers the road ${exitLeft}`);
+  assert.ok(exitRight < 50 * Math.PI / 180, `Exit VR leaves the picture ${exitRight}`);
+  assert.ok(hud.xr.y >= 32 && hud.xr.y < VR_LAYOUT_H * 0.25, `Exit VR y ${hud.xr.y}`);
+
+  for (const key of ["race", "help", "race-chat", "hotbar"]) {
+    assert.equal(overlaps(hud.xr, hud[key]), false, `${key} covers Exit VR`);
+  }
 });
 
-test("an opened settings panel joins the right column and still clears the road", () => {
+test("an opened settings panel stays off the road and off Exit VR", () => {
   const hud = windows();
   hud.settings.y = 40;
-  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
-  assert.ok(hud.settings.x > VR_LAYOUT_W * 0.5);
-  assert.ok(hud.settings.y >= 32);
+  stageVrPanels({ windows: hud, layoutW: LAYOUT_W, layoutH: VR_LAYOUT_H });
   const [left, right] = yawEdges(hud.settings);
-  const clear = 12 * Math.PI / 180;
-  assert.ok(left >= clear || right <= -clear);
+  const aside = 50 * Math.PI / 180;
+  assert.ok(right < -aside || left > aside);
+  assert.equal(overlaps(hud.xr, hud.settings), false);
 });

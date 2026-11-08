@@ -40,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
+import { stageVrPanels, VR_LAYOUT_H } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -377,7 +377,6 @@ const boot = createSceneHudBootstrap({
     uiPreset: "minimal",
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
-    vrLayoutW: VR_LAYOUT_W,
     vrLayoutH: VR_LAYOUT_H,
     onHotbarSlot({ index }) {
       if (index === HOTBAR.camera) cycleView();
@@ -552,14 +551,13 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Halo grids open windows across the forward picture and pins the hotbar
-  // off to the side. Restage both into the side columns so the road stays
-  // clear and the panels stay reachable.
+  // Halo's grid fills the picture, and a yaw on the HUD root draws panels
+  // the laser cannot hit. Keep the root at yaw 0 and restage around that.
   const hud = hudSystem?.hud;
   stageVrPanels({
     windows: hud?.ui?.windows,
-    layoutW: hud?.layoutW || VR_LAYOUT_W,
-    layoutH: hud?.layoutH || VR_LAYOUT_H,
+    layoutW: hud?.layoutW,
+    layoutH: hud?.layoutH,
   });
 }
 function captureVrDesktop() {
@@ -852,8 +850,9 @@ function placeWorld(presenting) {
       poseP,
     );
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
-    const hudRoot = hudSystem?.hud?.root;
-    if (hudRoot) hudRoot.rotation.set(0, placed.hudYaw, 0);
+    // Halo zeros this after the frame and aims the laser there. A yaw here
+    // draws the panels in the face and the Exit VR click misses.
+    if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);
