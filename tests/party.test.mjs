@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { CAN_COLORS, RIDER_LOOKS, acceptedLook, defaultLook, lookKey, nameBlock } from "../src/looks.js";
+import { CAN_COLORS, HAIR_COLORS, OLD_HAIR, RIDER_LOOKS, SKIN_COLORS, acceptedLook, defaultLook, faceHex, lookKey, nameBlock, recallLook, recallName, rememberLook, rememberName } from "../src/looks.js";
 import { createMaterials } from "../src/materials.js";
 import {
   canHostDevice,
@@ -249,7 +249,8 @@ test("the local can stays green and a remote can clones its band", () => {
   assert.equal(localBand.material, againBand.material);
   assert.equal(localBand.material.color.getHex(), 0x2f7d4a);
   assert.notEqual(remoteBand.material, localBand.material);
-  assert.equal(remoteBand.material.color.getHex(), 0xc23b3b);
+  assert.equal(shellHex(remote), 0xc23b3b);
+  assert.notEqual(remoteBand.material.color.getHex(), 0xc23b3b);
   assert.equal(localBand.material.color.getHex(), 0x2f7d4a);
   assert.notEqual(shirtColor(local), shirtColor(remote));
 });
@@ -261,11 +262,12 @@ test("the default look is the rider createRider builds when no look is passed", 
   const chosen = createRider(THREE, materials, props, defaultLook());
   assert.equal(shirtColor(plain), shirtColor(chosen));
   assert.equal(shirtColor(plain), RIDER_LOOKS[1].color);
-  assert.equal(bandMesh(chosen).material.color.getHex(), CAN_COLORS[0].can);
+  assert.equal(shellHex(chosen), CAN_COLORS[0].can);
   assert.notEqual(bandMesh(chosen).material, bandMesh(plain).material);
+  assert.notEqual(bandMesh(chosen).material.color.getHex(), CAN_COLORS[0].can);
   const red = createRider(THREE, materials, props, { shirtRand: RIDER_LOOKS[0].shirtRand, can: CAN_COLORS[1].can });
   assert.equal(shirtColor(red), RIDER_LOOKS[0].color);
-  assert.equal(bandMesh(red).material.color.getHex(), CAN_COLORS[1].can);
+  assert.equal(shellHex(red), CAN_COLORS[1].can);
   assert.equal(acceptedLook({ shirtRand: 0.01, can: CAN_COLORS[0].can }), null);
 });
 
@@ -294,6 +296,76 @@ test("clothes, hair, the can, and a logo are part of the look", () => {
   assert.equal(findNamed(plain.root, "can-square"), null);
   const logo = findNamed(styled.root, "can-logo");
   assert.ok(logo.position.z > 0.3, `logo z ${logo.position.z}`);
+  assert.ok(logo.geometry.parameters.width >= 0.5, `logo width ${logo.geometry.parameters.width}`);
+  assert.ok(logo.position.y < 0.5, `logo should sit below the stripe, y ${logo.position.y}`);
+  const skirt = findNamed(styled.person, "person-skirt");
+  const skirtPos = skirt.geometry.attributes.position;
+  let waist = 0;
+  let hem = 0;
+  let high = -Infinity;
+  let low = Infinity;
+  for (let i = 0; i < skirtPos.count; i += 1) {
+    const y = skirtPos.getY(i);
+    const radius = Math.hypot(skirtPos.getX(i), skirtPos.getZ(i));
+    if (y > high) {
+      high = y;
+      waist = radius;
+    }
+    if (y < low) {
+      low = y;
+      hem = radius;
+    }
+  }
+  assert.ok(hem > waist * 1.4, `skirt hem ${hem} waist ${waist}`);
+  assert.ok(hem > 0.72, `skirt hem ${hem} does not cover a stepping calf`);
+  assert.equal(skirt.material.transparent, false);
+  assert.equal(skirt.material.opacity, 1);
+  const thigh = styled.person.userData.limbs.legL.children.find((child) => child.isMesh);
+  assert.equal(thigh.material.color.getHex(), skirt.material.color.getHex());
+  const skirtNormal = skirt.geometry.attributes.normal;
+  let outer = 0;
+  for (let i = 0; i < skirtPos.count; i += 1) {
+    if (Math.abs(skirtPos.getZ(i)) > 0.05) continue;
+    outer = Math.max(outer, skirtPos.getX(i));
+  }
+  let outward = 0;
+  let seen = 0;
+  for (let i = 0; i < skirtPos.count; i += 1) {
+    const x = skirtPos.getX(i);
+    const z = skirtPos.getZ(i);
+    if (x < outer - 0.03 || Math.abs(z) > 0.05) continue;
+    seen += 1;
+    outward += skirtNormal.getX(i) * x + skirtNormal.getZ(i) * z;
+  }
+  assert.ok(seen > 0 && outward > 0, `skirt normals face inward (${outward})`);
+  const drum = createRider(THREE, materials, props, { ...defaultLook(), canShape: "drum", logo: "bolt" });
+  assert.equal(findNamed(drum.root, "can-square"), null);
+  assert.ok(findNamed(drum.root, "can-drum"));
+  const drumLogo = findNamed(drum.root, "can-logo");
+  const drumShell = findNamed(drum.root, "can-drum");
+  const shellPos = drumShell.geometry.attributes.position;
+  let belly = 0;
+  for (let i = 0; i < shellPos.count; i += 1) {
+    if (Math.abs(shellPos.getY(i) - drumLogo.position.y) > 0.06) continue;
+    if (Math.abs(shellPos.getX(i)) > 0.08) continue;
+    belly = Math.max(belly, shellPos.getZ(i));
+  }
+  assert.ok(belly > 0.2, `drum belly z ${belly}`);
+  assert.ok(drumLogo.position.z > belly, `logo buried in the shell, z ${drumLogo.position.z} belly ${belly}`);
+  assert.ok(drumLogo.position.z < belly + 0.03, `logo floats off the shell, z ${drumLogo.position.z} belly ${belly}`);
+  drum.place({
+    x: 0,
+    y: 0,
+    z: 0,
+    forward: { x: 0, y: 0, z: -1 },
+    right: { x: 1, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+  }, 0, Math.PI / 2, 0, 0, true);
+  drum.root.updateMatrixWorld(true);
+  const spun = new THREE.Vector3();
+  drumLogo.getWorldPosition(spun);
+  assert.ok(spun.z > 0.4, `spun logo should stay on the camera side, z ${spun.z}`);
+  assert.ok(Math.abs(spun.x) < 0.05, `spun logo should not swing sideways, x ${spun.x}`);
   const bin = createRider(THREE, materials, props, { ...defaultLook(), canShape: "square" });
   assert.equal(findNamed(bin.root, "can-square").material.metalness, 0.72);
   assert.equal(findNamed(bin.root, "can-logo"), null);
@@ -325,7 +397,8 @@ test("age and can size are part of the look", () => {
   assert.ok(young.person.scale.x < adult.person.scale.x);
   assert.ok(young.person.position.y > adult.person.position.y);
   assert.ok(findNamed(elder.person, "person-glasses"));
-  assert.equal(findNamed(elder.person, "person-hair-short").material.color.getHex(), 0xcfc8bc);
+  // defaultLook already chose a hair color, so Old does not paint over it.
+  assert.equal(findNamed(elder.person, "person-hair-short").material.color.getHex(), defaultLook().hairColor);
   assert.equal(findNamed(elder.root, "rider-can").scale.x, 1.28);
   assert.ok(elder.person.scale.x > adult.person.scale.x);
   animatePerson(elder.person, 0);
@@ -335,12 +408,232 @@ test("age and can size are part of the look", () => {
   assert.equal(findNamed(bald, "person-hair-short"), null);
   const town = props.createPerson(() => 0.2, "walk");
   assert.equal(findNamed(town, "person-glasses"), null);
-  assert.equal(findNamed(town, "person-head").scale.x, findNamed(adult.person, "person-head").scale.x);
+  assert.equal(findNamed(town, "person-head").scale.x, 0.15);
+  assert.ok(findNamed(adult.person, "person-head").scale.x > findNamed(town, "person-head").scale.x);
   const odd = acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, age: "ancient", canSize: "huge" });
   assert.equal(odd.age, "adult");
   assert.equal(odd.canSize, "regular");
   assert.notEqual(lookKey(defaultLook()), lookKey({ ...defaultLook(), age: "young" }));
   assert.notEqual(lookKey(defaultLook()), lookKey({ ...defaultLook(), canSize: "small" }));
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, canShape: "flare" }).canShape, "flare");
+  const bag = new Map();
+  const storage = {
+    getItem: (key) => (bag.has(key) ? bag.get(key) : null),
+    setItem: (key, value) => bag.set(key, String(value)),
+  };
+  rememberLook(storage, { ...defaultLook(), bottom: "skirt", canShape: "oval", hair: "bun" });
+  assert.equal(recallLook(storage).bottom, "skirt");
+  assert.equal(recallLook(storage).canShape, "oval");
+  assert.equal(recallLook(storage).hair, "bun");
+  rememberLook(storage, { canShape: "cape" });
+  assert.equal(recallLook(storage).canShape, "round");
+  storage.setItem("gcr.look.v1", "{");
+  assert.equal(recallLook(storage).body, "man");
+  rememberName(storage, "  Ada  ");
+  assert.equal(recallName(storage), "Ada");
+});
+
+test("skin, hair color, complexion, and a shirt mark are part of the look", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const legacy = acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a });
+  assert.equal(legacy.skin, 0xd9a47a);
+  assert.equal(legacy.hairColor, 0x5a3a28);
+  assert.equal(legacy.complexion, "even");
+  assert.equal(lookKey(legacy), lookKey(defaultLook()));
+  assert.equal(acceptedLook({ shirtRand: 0.01, can: 0x2f7d4a, skin: 0x8d5a3c }), null);
+  const red = acceptedLook({ shirtRand: RIDER_LOOKS[0].shirtRand, can: CAN_COLORS[0].can });
+  assert.equal(red.skin, 0xf0c2a0);
+  assert.equal(red.hairColor, 0x2a211c);
+  const oldBare = acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, age: "old" });
+  assert.equal(oldBare.hairColor, OLD_HAIR);
+  assert.equal(oldBare.complexion, "even");
+  const dyed = acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, age: "old", hairColor: 0x1a1a1a, complexion: "spotted" });
+  assert.equal(dyed.hairColor, 0x1a1a1a);
+  assert.equal(dyed.complexion, "even");
+  assert.equal(dyed.age, "old");
+  assert.notEqual(lookKey(legacy), lookKey({ ...legacy, skin: SKIN_COLORS[4].skin }));
+  assert.notEqual(lookKey(legacy), lookKey({ ...legacy, hairColor: HAIR_COLORS[0].hairColor }));
+  assert.notEqual(lookKey(legacy), lookKey({ ...legacy, complexion: "olive" }));
+
+  const town = props.createPerson(() => 0.2, "walk");
+  const townHead = findNamed(town, "person-head");
+  const townHex = townHead.material.color.getHex();
+  const deep = SKIN_COLORS[4].skin;
+  const rosy = createRider(THREE, materials, props, {
+    ...defaultLook(),
+    skin: deep,
+    hairColor: HAIR_COLORS[4].hairColor,
+    complexion: "rosy",
+    logo: "star",
+    logoColor: 0xc23b3b,
+  });
+  assert.equal(townHead.material.color.getHex(), townHex);
+  assert.equal(findNamed(rosy.person, "person-head").material.color.getHex(), faceHex(deep, "rosy"));
+  assert.notEqual(findNamed(rosy.person, "person-head").material, townHead.material);
+  let bodySkin = null;
+  rosy.person.traverse((object) => {
+    if (bodySkin || !object.isMesh || object.name === "person-head") return;
+    if (object.material?.color?.getHex() === deep) bodySkin = object;
+  });
+  assert.ok(bodySkin, "arms keep the skin swatch");
+  assert.equal(findNamed(rosy.person, "person-hair-short").material.color.getHex(), HAIR_COLORS[4].hairColor);
+  assert.equal(findNamed(rosy.person, "person-freckle"), null);
+  const freckled = createRider(THREE, materials, props, { ...defaultLook(), complexion: "freckled" });
+  const spot = findNamed(freckled.person, "person-freckle");
+  assert.ok(spot);
+  assert.ok(spot.position.z < -0.05, `freckles sit on the face, z ${spot.position.z}`);
+  assert.equal(findNamed(town, "person-freckle"), null);
+  assert.equal(findNamed(town, "shirt-logo"), null);
+  const gray = createRider(THREE, materials, props, oldBare);
+  assert.equal(findNamed(gray.person, "person-hair-short").material.color.getHex(), OLD_HAIR);
+  const black = createRider(THREE, materials, props, dyed);
+  assert.equal(findNamed(black.person, "person-hair-short").material.color.getHex(), 0x1a1a1a);
+
+  const sample = {
+    x: 0, y: 0, z: 0,
+    forward: { x: 0, y: 0, z: -1 },
+    right: { x: 1, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+  };
+  rosy.place(sample, 0, Math.PI / 2, 0, 0, true);
+  rosy.root.updateMatrixWorld(true);
+  const back = findNamed(rosy.person, "shirt-logo-back");
+  const front = findNamed(rosy.person, "shirt-logo");
+  assert.ok(back);
+  assert.ok(front);
+  assert.equal(back.material, front.material);
+  assert.equal(back.material.color.getHex(), 0xc23b3b);
+  assert.notEqual(back.material, findNamed(rosy.root, "can-logo").material);
+  const backPos = new THREE.Vector3();
+  const frontPos = new THREE.Vector3();
+  back.getWorldPosition(backPos);
+  front.getWorldPosition(frontPos);
+  const half = (back.geometry.parameters.height * rosy.person.scale.y) / 2;
+  assert.ok(backPos.z > 0.05, `shirt mark should face the chase camera, z ${backPos.z}`);
+  assert.ok(frontPos.z < -0.05, `shirt mark should also face the nose, z ${frontPos.z}`);
+  assert.ok(backPos.y - half > 0.98, `shirt mark should clear the rim, bottom ${backPos.y - half}`);
+  const backNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(back.getWorldQuaternion(new THREE.Quaternion()));
+  const frontNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(front.getWorldQuaternion(new THREE.Quaternion()));
+  assert.ok(backNormal.z > 0.9, `back mark normal ${backNormal.z}`);
+  assert.ok(frontNormal.z < -0.9, `front mark normal ${frontNormal.z}`);
+  const blouse = createRider(THREE, materials, props, { ...defaultLook(), top: "blouse", logo: "bolt" });
+  assert.ok(findNamed(blouse.person, "person-blouse"));
+  assert.ok(findNamed(blouse.person, "shirt-logo"));
+  assert.equal(findNamed(createRider(THREE, materials, props, defaultLook()).person, "shirt-logo"), null);
+  const big = createRider(THREE, materials, props, { ...defaultLook(), logo: "diamond", canSize: "big" });
+  big.place(sample, 0, 0, 0, 0, true);
+  big.root.updateMatrixWorld(true);
+  const bigMark = findNamed(big.person, "shirt-logo-back");
+  const bigPos = new THREE.Vector3();
+  bigMark.getWorldPosition(bigPos);
+  const bigHalf = (bigMark.geometry.parameters.height * big.person.scale.y) / 2;
+  assert.ok(bigPos.y - bigHalf > 0.98 * 1.28, `big can mark bottom ${bigPos.y - bigHalf}`);
+});
+
+test("a sealed town person is one mesh and an unsealed one keeps a head", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const loose = props.createPerson(() => 0.2, "walk");
+  assert.ok(loose.userData.limbs);
+  assert.ok(findNamed(loose, "person-head"));
+
+  const sealed = props.seal(props.createPerson(() => 0.4, "walk"));
+  assert.equal(sealed.userData.limbs, undefined);
+  assert.equal(findNamed(sealed, "person-head"), null);
+  let painted = 0;
+  sealed.traverse((node) => {
+    if (node.isMesh) painted += 1;
+  });
+  assert.equal(painted, 1);
+
+  const block = new THREE.Group();
+  const kept = props.createPerson(() => 0.2, "walk");
+  kept.userData.actor = true;
+  block.add(kept);
+  block.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), materials.lambert(0x2244aa)));
+  const other = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), materials.lambert(0xaa4422));
+  other.position.x = 2;
+  block.add(other);
+  props.compile(block);
+  assert.ok(findNamed(kept, "person-head"));
+  let folded = 0;
+  block.traverse((node) => {
+    if (node.isMesh && node.material.vertexColors && !kept.getObjectById?.(node.id)) folded += 1;
+  });
+  // The person is skipped, so only the two boxes share one painted mesh.
+  assert.equal(folded, 1);
+  const colors = block.children.find((node) => node.isMesh && node.material.vertexColors)?.geometry.getAttribute("color");
+  assert.ok(colors && colors.count > 8);
+  assert.ok(Math.abs(colors.getX(0) - colors.getX(colors.count - 3)) > 0.05);
+
+  const lamps = new THREE.Group();
+  lamps.add(new THREE.Mesh(new THREE.BoxGeometry(), materials.headlight));
+  const second = new THREE.Mesh(new THREE.BoxGeometry(), materials.headlight);
+  second.position.x = 1;
+  lamps.add(second);
+  const beacon = new THREE.Mesh(
+    new THREE.BoxGeometry(),
+    new THREE.MeshLambertMaterial({ color: 0xff2200, emissive: 0xff2200 }),
+  );
+  beacon.name = "beacon";
+  lamps.add(beacon);
+  props.seal(lamps);
+  assert.equal(lamps.getObjectByName("beacon"), beacon);
+  let heads = 0;
+  lamps.traverse((node) => {
+    if (node.isMesh && node.material === materials.headlight) heads += 1;
+  });
+  assert.equal(heads, 1);
+
+  const car = props.seal(props.createCar(() => 0.2, "plain"));
+  assert.ok(car.userData.wheels.length >= 4);
+  for (const pivot of car.userData.wheels) {
+    assert.equal(pivot.parent, car);
+    const meshes = [];
+    pivot.traverse((node) => {
+      if (node.isMesh) meshes.push(node);
+    });
+    assert.equal(meshes.length, 2);
+    assert.equal(meshes.filter((node) => node.userData.hub).length, 1);
+    const hub = meshes.find((node) => node.userData.hub);
+    assert.equal(hub.material.metalness, 0.72);
+  }
+  const scene = new THREE.Scene();
+  const draws = props.createDrawSet(scene);
+  draws.adopt(car);
+  draws.finish();
+  for (const pivot of car.userData.wheels) {
+    const meshes = [];
+    pivot.traverse((node) => {
+      if (node.isMesh) meshes.push(node);
+    });
+    assert.equal(meshes.length, 1);
+    assert.equal(meshes[0].userData.hub, true);
+    assert.equal(pivot.parent, car);
+  }
+  const lot = new THREE.Group();
+  const capMat = materials.standard(0xd5dbe2, { flat: true, roughness: 0.3, metalness: 0.72 });
+  for (const x of [0, 2]) {
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(), capMat);
+    cap.userData.hub = true;
+    cap.position.x = x;
+    lot.add(cap);
+  }
+  props.compile(lot);
+  let parkedCaps = 0;
+  lot.traverse((node) => {
+    if (node.isMesh && node.material === capMat) parkedCaps += 1;
+  });
+  assert.equal(parkedCaps, 1);
+  car.position.set(4, 0, -2);
+  car.userData.wheels[0].rotation.x = 0.7;
+  draws.sync();
+  const batch = scene.children.find((node) => node.isBatchedMesh);
+  assert.ok(batch);
+  assert.ok(batch.geometry.getAttribute("position").count > 100);
+  draws.dispose();
+  assert.equal(scene.children.length, 0);
 });
 
 test("a name has to be filled in and free in this session", () => {
@@ -398,16 +691,16 @@ test("a remote rider wears a sent look and keeps the slot color when the look is
   const pink = { s: 1, shirtRand: RIDER_LOOKS[4].shirtRand, can: CAN_COLORS[4].can };
   remotes.show(2, pink, 0, true);
   const first = scene.getObjectByName("rider-slot-2");
-  assert.equal(bandMesh({ root: first }).material.color.getHex(), CAN_COLORS[4].can);
+  assert.equal(shellHex({ root: first }), CAN_COLORS[4].can);
   assert.equal(shirtColor({ person: first }), RIDER_LOOKS[4].color);
   remotes.show(2, { s: 2, shirtRand: RIDER_LOOKS[0].shirtRand, can: CAN_COLORS[2].can }, 30, true);
   const next = scene.getObjectByName("rider-slot-2");
   assert.notEqual(next, first);
-  assert.equal(bandMesh({ root: next }).material.color.getHex(), CAN_COLORS[2].can);
+  assert.equal(shellHex({ root: next }), CAN_COLORS[2].can);
   assert.equal(scene.children.filter((child) => child.name === "rider-slot-2").length, 1);
   remotes.show(3, { s: 1 }, 0, true);
   const fallback = scene.getObjectByName("rider-slot-3");
-  assert.equal(bandMesh({ root: fallback }).material.color.getHex(), SLOT_LOOKS[3].can);
+  assert.equal(shellHex({ root: fallback }), SLOT_LOOKS[3].can);
   remotes.show(2, { ...pink, logo: "star" }, 60, true);
   const marked = scene.getObjectByName("rider-slot-2");
   assert.ok(findNamed(marked, "can-logo"));
@@ -430,6 +723,38 @@ function meshAtY(root, y) {
   });
   return found;
 }
+
+function shellHex(rider) {
+  let found = null;
+  rider.root.traverse((object) => {
+    if (found || !object.isMesh) return;
+    if (object.name === "can-round" || object.name === "can-square" || object.name === "can-drum"
+      || object.name === "can-taper" || object.name === "can-oval" || object.name === "can-flare") {
+      found = object;
+    }
+  });
+  return found.material.color.getHex();
+}
+
+test("men and women differ in the body and the face", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const man = props.createPerson(() => 0.2, "stand", { body: "man" });
+  const woman = props.createPerson(() => 0.2, "stand", { body: "woman" });
+  const town = props.createPerson(() => 0.2, "stand");
+  const head = (person) => findNamed(person, "person-head");
+  assert.ok(head(woman).scale.x < head(man).scale.x, "a woman's skull is narrower");
+  assert.ok(findNamed(woman, "person-lashes"));
+  assert.ok(findNamed(woman, "person-bust"));
+  assert.equal(findNamed(man, "person-lashes"), null);
+  assert.equal(findNamed(man, "person-bust"), null);
+  assert.ok(findNamed(man, "person-brow-ridge"));
+  assert.ok(findNamed(man, "person-jaw"));
+  assert.equal(findNamed(woman, "person-brow-ridge"), null);
+  assert.equal(findNamed(town, "person-lashes"), null);
+  assert.equal(findNamed(town, "person-brow-ridge"), null);
+  assert.ok(meshAtY(woman, 1.24).scale.x < meshAtY(man, 1.24).scale.x);
+});
 
 function bandMesh(rider) {
   let found = null;

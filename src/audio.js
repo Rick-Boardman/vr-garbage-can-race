@@ -322,6 +322,7 @@ export function createSound() {
     return {
       update() {},
       attach() {},
+      setMaster() {},
       status: () => status,
     };
   }
@@ -385,6 +386,11 @@ export function createSound() {
   return {
     attach(renderer) {
       renderer?.xr?.addEventListener?.("sessionstart", unlock);
+    },
+    setMaster(level) {
+      const next = Number(level);
+      if (!Number.isFinite(next)) return;
+      master.gain.value = Math.min(1, Math.max(0, next));
     },
     update(frame) {
       status.state = ctx.state;

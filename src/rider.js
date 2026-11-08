@@ -1,5 +1,6 @@
 import { CAN_SHELLS } from "./can-geometry.js";
 import { applyFrame } from "./frame.js";
+import { COMPLEXIONS, HAIR_COLORS, SKIN_COLORS, mixHex } from "./looks.js";
 import { animatePerson, onFootPose } from "./props.js";
 
 // The shell is built with its origin on the road. Spinning that origin
@@ -30,9 +31,7 @@ export function createRider(THREE, materials, props, look = null) {
   // Size is the drawn shell. The race still hits with the shared can radius.
   const canScale = canScaleOf(look);
   can.scale.setScalar(canScale);
-  if (look?.canShape === "square") addSquareCan(can, THREE, materials, look);
-  else addRoundCan(can, THREE, materials, look);
-  addLogo(can, THREE, materials, look);
+  addCan(can, THREE, materials, look);
   const shirtRand = look?.shirtRand ?? 0.2;
   const person = props.createPerson(() => shirtRand, "ride", personStyle(look));
   // Feet of the unscaled person sit near local y = 0.1. Scale keeps the
@@ -43,6 +42,7 @@ export function createRider(THREE, materials, props, look = null) {
   const seatedPersonY = () => 0.06 - 0.1 * personScale + ageLift * canScale;
   person.scale.setScalar(personScale);
   person.position.y = seatedPersonY();
+  addShirtMark(person, THREE, look, canScale, personScale, seatedPersonY());
   const shadow = new THREE.Mesh(
     new THREE.CircleGeometry(0.55, 14),
     materials.shadow,
@@ -51,7 +51,27 @@ export function createRider(THREE, materials, props, look = null) {
   shadow.position.y = 0.04;
   shadow.scale.setScalar(canScale);
 
+  const logoMount = addLogo(THREE, materials, look);
   root.add(can, person, shadow);
+  if (logoMount) {
+    // Same scale as the shell, without inheriting its roll.
+    logoMount.scale.copy(can.scale);
+    root.add(logoMount);
+  }
+
+  // The mark is a sibling of the spinning shell, parked on the camera side.
+  function parkLogo(tilt) {
+    if (!logoMount) return;
+    logoMount.position.copy(can.position);
+    logoMount.rotation.set(tilt, 0, 0);
+  }
+
+  function parkLogoApart(sample, tilt) {
+    if (!logoMount) return;
+    logoMount.position.copy(can.position);
+    applyFrame(logoMount, sample, 0);
+    if (tilt) logoMount.rotateX(tilt);
+  }
 
   function place(sample, offset, spin, bank, hop, showPerson) {
     root.position.set(
@@ -64,6 +84,9 @@ export function createRider(THREE, materials, props, look = null) {
     can.position.set(0, canGroundClearance(tilt) * canScale, 0);
     can.rotation.set(0, spin, 0);
     if (tilt) can.rotateX(tilt);
+    // The shell rolls on yaw. The mark stays on the rider's +z, the side
+    // the chase camera sits on, and only tips when the can tips.
+    parkLogo(tilt);
     person.position.set(0, seatedPersonY(), 0);
     person.rotation.set(0, 0, 0);
     person.userData.pose = "ride";
@@ -99,6 +122,7 @@ export function createRider(THREE, materials, props, look = null) {
     can.rotateY(canSpin);
     can.rotateX(tilt);
     liftAlong(can, canSample, canGroundClearance(tilt) * canScale);
+    parkLogoApart(canSample, tilt);
     const fx = facing?.x ?? bodySample.forward.x;
     const fz = facing?.z ?? bodySample.forward.z;
     const length = Math.hypot(fx, fz) || 1;
@@ -138,14 +162,29 @@ export function createRider(THREE, materials, props, look = null) {
   return { root, place, placeApart, animate, person };
 }
 
+function listedHex(list, key, value) {
+  const hex = Number(value);
+  return list.some((row) => row[key] === hex) ? hex : null;
+}
+
 function personStyle(look) {
-  if (!look?.body && !look?.top && !look?.bottom && !look?.hair && !look?.age) return null;
+  const styled = look && (
+    look.body || look.top || look.bottom || look.hair || look.age
+    || look.skin != null || look.hairColor != null || look.complexion
+  );
+  if (!styled) return null;
+  const skin = listedHex(SKIN_COLORS, "skin", look.skin);
+  const hairColor = listedHex(HAIR_COLORS, "hairColor", look.hairColor);
+  const complexion = COMPLEXIONS.some((row) => row.id === look.complexion) ? look.complexion : "even";
   return {
     body: look.body === "woman" ? "woman" : "man",
     age: look.age === "young" || look.age === "old" ? look.age : "adult",
     top: look.top === "blouse" ? "blouse" : "tee",
     bottom: look.bottom === "skirt" ? "skirt" : "pants",
     hair: look.hair === "long" || look.hair === "bun" || look.hair === "bald" ? look.hair : "short",
+    ...(skin != null ? { skin } : {}),
+    ...(hairColor != null ? { hairColor } : {}),
+    complexion,
   };
 }
 
@@ -157,6 +196,17 @@ function canScaleOf(look) {
 
 const shellGeometry = new Map();
 const logoTextures = new Map();
+const shirtLogoTextures = new Map();
+
+function shellId(look) {
+  const shape = look?.canShape;
+  return CAN_SHELLS[shape] ? shape : "round";
+}
+
+function own(material) {
+  material.userData.owned = true;
+  return material;
+}
 
 function shellMesh(THREE, materials, look, shape) {
   const data = CAN_SHELLS[shape];
@@ -169,34 +219,52 @@ function shellMesh(THREE, materials, look, shape) {
     shellGeometry.set(shape, geometry);
   }
   const rubber = look?.canMaterial === "rubber";
-  // Smooth shading so the rolled shell reads as metal. Clone before DoubleSide
-  // so the cached material stays single-sided for anything else.
+  // The swatch colors the shell. A look with no can keeps the gray metal.
+  // Clone before DoubleSide so the cached material stays single-sided.
+  const color = look?.can != null ? Number(look.can) : (rubber ? 0x2f7d4a : 0x9aa3a8);
   const shared = rubber
-    ? materials.standard(Number(look?.can) || 0x2f7d4a, { flat: false, roughness: 0.96, metalness: 0 })
-    : materials.standard(0x9aa3a8, { flat: false, roughness: 0.38, metalness: 0.72 });
-  const material = shared.clone();
+    ? materials.standard(color, { flat: false, roughness: 0.96, metalness: 0 })
+    : materials.standard(color, { flat: false, roughness: 0.38, metalness: 0.72 });
+  const material = own(shared.clone());
   material.side = THREE.DoubleSide;
   const mesh = new THREE.Mesh(geometry, material);
-  if (shape === "square") mesh.name = "can-square";
-  else if (rubber) mesh.name = "can-rubber";
+  mesh.name = `can-${shape}`;
   return mesh;
+}
+
+function hoopHex(hex) {
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  const luma = 0.3 * r + 0.59 * g + 0.11 * b;
+  // A dark shell needs a light hoop or the stripe disappears into the paint.
+  return luma < 70 ? 0xd7dee2 : mixHex(hex, 0x101410, 0.55);
 }
 
 function addColorBand(can, THREE, materials, look, shape) {
   const sharedBand = materials.lambert(0x2f7d4a, { flat: false, side: THREE.DoubleSide });
-  const bandMaterial = look?.can == null ? sharedBand : sharedBand.clone();
-  if (look?.can != null) bandMaterial.color.setHex(look.can);
-  const band = shape === "square"
-    ? new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.9), bandMaterial)
-    : new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.49, 0.12, 28, 1, true), bandMaterial);
+  const bandMaterial = look?.can == null ? sharedBand : own(sharedBand.clone());
+  if (look?.can != null) bandMaterial.color.setHex(hoopHex(Number(look.can)));
+  let band;
+  if (shape === "square") {
+    band = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.9), bandMaterial);
+  } else if (shape === "round") {
+    band = new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.49, 0.12, 28, 1, true), bandMaterial);
+  } else {
+    const shell = CAN_SHELLS[shape];
+    band = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.12, 28, 1, true), bandMaterial);
+    band.scale.set(shell.bandX, 1, shell.bandZ);
+  }
+  band.name = "can-band";
   band.position.y = 0.62;
   can.add(band);
 }
 
-function addFloor(can, THREE, materials, look) {
+function addFloor(can, THREE, materials, look, shape) {
   const rubber = look?.canMaterial === "rubber";
+  const radius = shape === "round" || shape === "square" ? 0.36 : CAN_SHELLS[shape].footR;
   const floor = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.36, 0.38, 0.06, 12),
+    new THREE.CylinderGeometry(radius, radius + 0.02, 0.06, 12),
     materials.standard(0x6a7378, { roughness: 0.5, metalness: rubber ? 0 : 0.55 }),
   );
   floor.name = "can-floor";
@@ -204,44 +272,234 @@ function addFloor(can, THREE, materials, look) {
   can.add(floor);
 }
 
-function addRoundCan(can, THREE, materials, look) {
-  can.add(shellMesh(THREE, materials, look, "round"));
-  addFloor(can, THREE, materials, look);
-  addColorBand(can, THREE, materials, look, "round");
+function addCan(can, THREE, materials, look) {
+  const shape = shellId(look);
+  can.add(shellMesh(THREE, materials, look, shape));
+  addFloor(can, THREE, materials, look, shape);
+  addColorBand(can, THREE, materials, look, shape);
 }
 
-function addSquareCan(can, THREE, materials, look) {
-  can.add(shellMesh(THREE, materials, look, "square"));
-  addFloor(can, THREE, materials, look);
-  addColorBand(can, THREE, materials, look, "square");
-}
+const MARKS = {
+  round: [0.62, 0.36],
+  square: [0.7, 0.4],
+  drum: [0.64, 0.36],
+  taper: [0.56, 0.36],
+  oval: [0.7, 0.34],
+  flare: [0.58, 0.36],
+};
 
 function logoTexture(THREE, id) {
   if (typeof document === "undefined") return null;
   let texture = logoTextures.get(id);
   if (texture) return texture;
-  texture = new THREE.TextureLoader().load(`assets/logos/${id}.png`);
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#ffffff";
+  ctx.translate(size / 2, size / 2);
+  const radius = size * 0.4;
+  ctx.beginPath();
+  if (id === "ring") {
+    ctx.lineWidth = size * 0.11;
+    ctx.arc(0, 0, radius * 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (id === "diamond") {
+    ctx.moveTo(0, -radius);
+    ctx.lineTo(radius * 0.72, 0);
+    ctx.lineTo(0, radius);
+    ctx.lineTo(-radius * 0.72, 0);
+    ctx.closePath();
+    ctx.fill();
+  } else if (id === "bolt") {
+    ctx.moveTo(radius * 0.18, -radius);
+    ctx.lineTo(-radius * 0.55, radius * 0.08);
+    ctx.lineTo(-radius * 0.08, radius * 0.08);
+    ctx.lineTo(-radius * 0.22, radius);
+    ctx.lineTo(radius * 0.55, -radius * 0.1);
+    ctx.lineTo(radius * 0.02, -radius * 0.1);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    for (let i = 0; i < 10; i += 1) {
+      const arm = i % 2 === 0 ? radius : radius * 0.42;
+      const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+      const x = Math.cos(angle) * arm;
+      const y = Math.sin(angle) * arm;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+  texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
   logoTextures.set(id, texture);
   return texture;
 }
 
-function addLogo(can, THREE, materials, look) {
+// The can mark is large enough to mip cleanly. The shirt mark is a few
+// centimeters across, and those mips average the star away to nothing.
+function shirtLogoTexture(THREE, id) {
+  let texture = shirtLogoTextures.get(id);
+  if (texture) return texture;
+  const source = logoTexture(THREE, id);
+  if (!source?.image) return null;
+  // Same drawing as the can, without the can's mip chain. A clone of that
+  // texture uploads before its image is ready and the star vanishes.
+  texture = new THREE.CanvasTexture(source.image);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  shirtLogoTextures.set(id, texture);
+  return texture;
+}
+
+// Sit the mark on the shell at this height, a centimeter proud of the
+// nearest front vertex. The old mark used the shell's furthest +z, which
+// floated the star off the belly. Check: drum center z stays under markZ + 0.03.
+const MARK_PROUD = 0.012;
+
+function surfaceZ(shape, x, y, side) {
+  const data = CAN_SHELLS[shape];
+  const positions = data.positions;
+  let best = Infinity;
+  let z = side * (data.markZ || data.logoZ || 0.4);
+  // Shell normals point inward, so the chase side is +z, not +normal.
+  // Check: a sample at the logo's x,y on the drum lands near markZ.
+  for (let i = 0; i < positions.length; i += 3) {
+    const vz = positions[i + 2];
+    if (side > 0 ? vz < 0.05 : vz > -0.05) continue;
+    const dx = positions[i] - x;
+    const dy = positions[i + 1] - y;
+    const dist = dx * dx + dy * dy;
+    if (dist < best) {
+      best = dist;
+      z = vz;
+    }
+  }
+  return z + side * MARK_PROUD;
+}
+
+function curvedMark(THREE, shape, width, height, y, side) {
+  const cols = 8;
+  const rows = 4;
+  const centerZ = surfaceZ(shape, 0, y, side);
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const stride = cols + 1;
+  for (let row = 0; row <= rows; row += 1) {
+    const v = row / rows;
+    const py = y + (0.5 - v) * height;
+    for (let col = 0; col <= cols; col += 1) {
+      const u = col / cols;
+      const px = (u - 0.5) * width;
+      positions.push(px, py - y, surfaceZ(shape, px, py, side) - centerZ);
+      uvs.push(u, 1 - v);
+    }
+  }
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const a = row * stride + col;
+      const b = a + stride;
+      indices.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return { geometry, centerZ };
+}
+
+// The face looks down local -z. The chase camera sits on +z, so the mark on
+// the back of the shirt is the plane at +z. The front copy is turned to face
+// -z. Both are parented to the person, above the can rim when the chest clears it.
+function addShirtMark(person, THREE, look, canScale, personScale, seatedY) {
   const id = look?.logo;
   if (id !== "star" && id !== "ring" && id !== "diamond" && id !== "bolt") return;
-  const mat = materials.lambert(Number(look.logoColor) || 0xf2c879, { flat: true }).clone();
-  const texture = logoTexture(THREE, id);
-  if (texture) {
-    mat.map = texture;
-    mat.transparent = true;
-    mat.alphaTest = 0.45;
+  const chest = person.getObjectByName("person-chest");
+  if (!chest) return;
+  if (!chest.geometry.boundingBox) chest.geometry.computeBoundingBox();
+  const box = chest.geometry.boundingBox;
+  const top = chest.position.y + box.max.y * chest.scale.y;
+  const bottom = chest.position.y + box.min.y * chest.scale.y;
+  const halfZ = Math.max(-box.min.z, box.max.z) * chest.scale.z;
+  const span = Math.min((box.max.x - box.min.x) * chest.scale.x, top - bottom);
+  const rimLocal = (CAN_HEIGHT * canScale - seatedY) / personScale;
+  const room = top - rimLocal;
+  let size = Math.min(span * 0.72, Math.max(0.08, room * 0.9));
+  let center = top - size * 0.5 - 0.006;
+  if (center - size * 0.5 < rimLocal + 0.012) {
+    size = Math.max(0.08, top - 0.006 - (rimLocal + 0.012));
+    center = top - size * 0.5 - 0.006;
   }
-  const shape = look?.canShape === "square" ? "square" : "round";
-  const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), mat);
-  mark.name = "can-logo";
-  // PlaneGeometry faces +Z. The round band sits at radius 0.49, so the
-  // decal has to clear that or the stripe hides the middle of the mark.
-  const ahead = CAN_SHELLS[shape].logoZ + 0.02;
-  mark.position.set(0, 0.58, shape === "round" ? Math.max(ahead, 0.51) : ahead);
-  can.add(mark);
+  const mat = own(new THREE.MeshBasicMaterial({
+    color: Number(look.logoColor) || 0xf2c879,
+    transparent: true,
+    alphaTest: 0.4,
+    side: THREE.DoubleSide,
+  }));
+  const texture = shirtLogoTexture(THREE, id);
+  if (texture) mat.map = texture;
+  const z = halfZ + 0.012;
+  // Long hair hangs down the middle of the back and would hide a centered mark.
+  const backX = look?.hair === "long" ? Math.min(span * 0.28, size * 0.55) : 0;
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+  back.name = "shirt-logo-back";
+  back.position.set(backX, center, z);
+  const front = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+  front.name = "shirt-logo";
+  front.position.set(0, center, -z);
+  front.rotation.y = Math.PI;
+  person.add(back, front);
 }
+
+function addLogo(THREE, materials, look) {
+  const id = look?.logo;
+  if (id !== "star" && id !== "ring" && id !== "diamond" && id !== "bolt") return null;
+  const mat = own(new THREE.MeshBasicMaterial({
+    color: Number(look.logoColor) || 0xf2c879,
+    transparent: true,
+    alphaTest: 0.4,
+    side: THREE.DoubleSide,
+  }));
+  const texture = logoTexture(THREE, id);
+  if (texture) mat.map = texture;
+  const shape = shellId(look);
+  const [width, height] = MARKS[shape] || MARKS.round;
+  // The stripe owns y 0.56–0.68. The mark sits on the belly, on the metal.
+  const y = 0.34;
+  // The symbol itself is the mark. A backing disc read as a hole in the shell.
+  const mount = new THREE.Group();
+  mount.name = "can-logo-mount";
+  mount.add(
+    decal(THREE, shape, width, height, y, 1, mat, "can-logo"),
+    decal(THREE, shape, width * 0.78, height * 0.78, y, -1, mat, null),
+  );
+  return mount;
+}
+
+function decal(THREE, shape, width, height, y, side, material, name) {
+  let mesh;
+  if (shape === "square") {
+    mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+    mesh.position.set(0, y, surfaceZ(shape, 0, y, side));
+    if (side < 0) mesh.rotation.y = Math.PI;
+  } else {
+    const built = curvedMark(THREE, shape, width, height, y, side);
+    mesh = new THREE.Mesh(built.geometry, material);
+    mesh.position.set(0, y, built.centerZ);
+  }
+  if (name) mesh.name = name;
+  return mesh;
+}
+
+

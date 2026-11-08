@@ -1,7 +1,8 @@
 // Rider shirts match the order in props.js SHIRTS. shirtRand (index + 0.5) / 8
-// lands in that shirt, and the same draw picks skin, pants, and hair.
-// Blue is 0.2, the draw createRider uses when no look is passed. That is
-// still shirt index 1, and it keeps the same skin, pants, and hair.
+// lands in that shirt. A look with no skin or hair color still draws those
+// from SKIN_DRAW and HAIR_DRAW with the same shirtRand, which is what town
+// people and the original rider use. Blue is 0.2: shirt index 1, tan skin,
+// brown hair. A saved skin, hair color, or complexion replaces that draw.
 export const RIDER_LOOKS = [
   { shirtRand: 0.5 / 8, color: 0xe25b2a, label: "red" },
   { shirtRand: 0.2, color: 0x3d7edb, label: "blue" },
@@ -52,10 +53,78 @@ export const HAIR_STYLES = [
   { id: "bald", label: "Bald" },
 ];
 
+// Same order props.js uses for an unstyled person. Do not sort these.
+export const SKIN_DRAW = [0xf0c2a0, 0xd9a47a, 0xc6865a, 0x8d5a3c, 0xf3d3b8];
+export const HAIR_DRAW = [0x2a211c, 0x5a3a28, 0xc4a15a, 0x1a1a1a, 0x6a6a6a, 0x8b3a2a];
+// Old age with no chosen hair color. Also a swatch, so a rider can keep it.
+export const OLD_HAIR = 0xcfc8bc;
+
+export const SKIN_COLORS = [
+  { skin: 0xf3d3b8, label: "fair" },
+  { skin: 0xf0c2a0, label: "light" },
+  { skin: 0xd9a47a, label: "tan" },
+  { skin: 0xc6865a, label: "brown" },
+  { skin: 0x8d5a3c, label: "deep" },
+];
+
+export const HAIR_COLORS = [
+  { hairColor: 0x1a1a1a, label: "black" },
+  { hairColor: 0x2a211c, label: "dark" },
+  { hairColor: 0x5a3a28, label: "brown" },
+  { hairColor: 0x8b3a2a, label: "auburn" },
+  { hairColor: 0xc4a15a, label: "blonde" },
+  { hairColor: 0x6a6a6a, label: "ash" },
+  { hairColor: OLD_HAIR, label: "gray" },
+];
+
+export const COMPLEXIONS = [
+  { id: "even", label: "Even" },
+  { id: "rosy", label: "Rosy" },
+  { id: "warm", label: "Warm" },
+  { id: "cool", label: "Cool" },
+  { id: "olive", label: "Olive" },
+  { id: "freckled", label: "Freckled" },
+];
+
+// Face-only mix on top of the skin swatch. Even leaves the face the skin color.
+const COMPLEXION_TINT = {
+  rosy: [0xe07080, 0.34],
+  warm: [0xd4874a, 0.32],
+  cool: [0xa898c0, 0.36],
+  olive: [0x7f8a42, 0.4],
+  freckled: [0xd4874a, 0.16],
+};
+
+export function mixHex(base, tint, amount) {
+  const channel = (shift) => {
+    const from = (Number(base) >> shift) & 255;
+    const to = (Number(tint) >> shift) & 255;
+    return Math.round(from + (to - from) * amount) & 255;
+  };
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+}
+
+export function faceHex(skin, complexion) {
+  const tint = COMPLEXION_TINT[complexion];
+  if (!tint) return Number(skin);
+  return mixHex(skin, tint[0], tint[1]);
+}
+
+export function freckleHex(skin) {
+  return mixHex(skin, 0x4a2814, 0.62);
+}
+
 export const CAN_SHAPES = [
   { id: "round", label: "Round" },
   { id: "square", label: "Square" },
+  { id: "drum", label: "Drum" },
+  { id: "taper", label: "Taper" },
+  { id: "oval", label: "Oval" },
+  { id: "flare", label: "Flare" },
 ];
+
+export const LOOK_STORE = "gcr.look.v1";
+export const NAME_STORE = "gcr.name.v1";
 
 export const CAN_SIZES = [
   { id: "small", label: "Small" },
@@ -87,21 +156,22 @@ function choice(list, id, fallback) {
   return list.some((row) => row.id === id) ? id : fallback;
 }
 
+function knownHex(list, key, value) {
+  const hex = Number(value);
+  return list.some((row) => row[key] === hex) ? hex : null;
+}
+
+function drawn(list, shirtRand) {
+  const index = Math.floor(Number(shirtRand) * list.length);
+  if (index < 0 || index >= list.length) return list[0];
+  return list[index];
+}
+
 export function defaultLook() {
-  return {
-    body: "man",
-    age: "adult",
-    top: "tee",
-    bottom: "pants",
-    hair: "short",
+  return acceptedLook({
     shirtRand: RIDER_LOOKS[1].shirtRand,
-    canShape: "round",
-    canSize: "regular",
-    canMaterial: "metal",
     can: CAN_COLORS[0].can,
-    logo: "none",
-    logoColor: LOGO_COLORS[0].logoColor,
-  };
+  });
 }
 
 export function acceptedLook(raw) {
@@ -112,12 +182,19 @@ export function acceptedLook(raw) {
   if (!shirt || !color) return null;
   const logoColor = LOGO_COLORS.find((row) => row.logoColor === Number(raw?.logoColor))?.logoColor
     ?? LOGO_COLORS[0].logoColor;
+  const age = choice(AGES, raw?.age, "adult");
+  const skin = knownHex(SKIN_COLORS, "skin", raw?.skin) ?? drawn(SKIN_DRAW, shirt.shirtRand);
+  const hairColor = knownHex(HAIR_COLORS, "hairColor", raw?.hairColor)
+    ?? (age === "old" ? OLD_HAIR : drawn(HAIR_DRAW, shirt.shirtRand));
   return {
     body: choice(BODIES, raw?.body, "man"),
-    age: choice(AGES, raw?.age, "adult"),
+    age,
     top: choice(TOPS, raw?.top, "tee"),
     bottom: choice(BOTTOMS, raw?.bottom, "pants"),
     hair: choice(HAIR_STYLES, raw?.hair, "short"),
+    skin,
+    hairColor,
+    complexion: choice(COMPLEXIONS, raw?.complexion, "even"),
     shirtRand: shirt.shirtRand,
     canShape: choice(CAN_SHAPES, raw?.canShape, "round"),
     canSize: choice(CAN_SIZES, raw?.canSize, "regular"),
@@ -136,6 +213,9 @@ export function lookKey(raw) {
     look.top,
     look.bottom,
     look.hair,
+    look.skin,
+    look.hairColor,
+    look.complexion,
     look.shirtRand,
     look.canShape,
     look.canSize,
@@ -144,6 +224,38 @@ export function lookKey(raw) {
     look.logo,
     look.logoColor,
   ].join(":");
+}
+
+export function rememberLook(storage, look) {
+  try {
+    storage.setItem(LOOK_STORE, JSON.stringify(acceptedLook(look) || defaultLook()));
+  } catch {
+    // A private window can refuse storage. The look still applies this visit.
+  }
+}
+
+export function recallLook(storage) {
+  try {
+    return acceptedLook(JSON.parse(storage.getItem(LOOK_STORE) || "null")) || defaultLook();
+  } catch {
+    return defaultLook();
+  }
+}
+
+export function rememberName(storage, name) {
+  try {
+    storage.setItem(NAME_STORE, cleanName(name));
+  } catch {
+    // Same as the look: the typed name still works without storage.
+  }
+}
+
+export function recallName(storage) {
+  try {
+    return cleanName(storage.getItem(NAME_STORE));
+  } catch {
+    return "";
+  }
 }
 
 export function cleanName(name) {

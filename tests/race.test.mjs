@@ -35,6 +35,7 @@ import {
   animalRoamTarget,
   clampBusBias,
   collideSweptCars,
+  holdCarsForFoot,
   releaseBus,
   roadPathOpen,
   separateLane,
@@ -1575,6 +1576,175 @@ test("vehicles sometimes hit people and sometimes each other", () => {
   assert.ok(Math.abs(vehicleClearance(roof, 1.28, Math.PI) - roof) < 0.02);
 });
 
+test("on foot, cars stop for the rider and the rider does not walk through them", () => {
+  const foot = { s: 10, offset: 0, radius: 0.45, onFoot: true };
+  // Bumper is already inside the circle. Check: stop short of s = 10 - 2.66.
+  const into = {
+    id: "into",
+    s: 8.2,
+    offset: 0,
+    halfL: 2.15,
+    halfW: 0.95,
+    speed: 12,
+    cruise: 12,
+    prevS: 7.6,
+  };
+  assert.equal(holdCarsForFoot([into], [foot], 0.05), 1);
+  assert.ok(into.s < 10 - 2.15 - 0.45, `drove through to ${into.s}`);
+  assert.equal(into.speed, 0);
+  assert.equal(into.wreck, undefined);
+  assert.equal(into.footHold, true);
+  const parked = into.s;
+  into.prevS = into.s;
+  assert.equal(holdCarsForFoot([into], [foot], 0.05), 1);
+  assert.equal(into.s, parked, "the stop crept forward");
+  assert.equal(into.speed, 0);
+  assert.equal(recoverCruise(into, 0.05).speed, 0);
+
+  const jumped = { id: "jump", s: 20, offset: 0, halfL: 2.15, halfW: 0.95, speed: 40, cruise: 12 };
+  holdCarsForFoot([jumped], [foot], 0.5);
+  assert.ok(jumped.s < 10 - 2.15 - 0.45, `one step tunneled to ${jumped.s}`);
+  assert.equal(jumped.speed, 0);
+  assert.equal(jumped.wreck, undefined);
+
+  const oncoming = {
+    id: "up",
+    s: 12,
+    offset: 0,
+    halfL: 2.15,
+    halfW: 0.95,
+    speed: -12,
+    cruise: -12,
+    prevS: 12.6,
+  };
+  holdCarsForFoot([oncoming], [foot], 0.05);
+  assert.ok(oncoming.s > 10 + 2.15 + 0.45, `oncoming drove through to ${oncoming.s}`);
+  assert.equal(oncoming.speed, 0);
+  assert.equal(oncoming.wreck, undefined);
+
+  const beside = {
+    id: "beside",
+    s: 10,
+    offset: 0,
+    halfL: 2.15,
+    halfW: 0.95,
+    speed: 8,
+    cruise: 8,
+    prevS: 9.87,
+  };
+  holdCarsForFoot([beside], [{ s: 10, offset: 1.3, radius: 0.45, onFoot: true }], 0.016);
+  assert.equal(beside.s, 10, "a rider beside the doors rewound the car");
+  assert.equal(beside.speed, 8);
+
+  const cruiser = {
+    id: "ride",
+    s: 8.2,
+    offset: 0,
+    halfL: 2.15,
+    halfW: 0.95,
+    speed: 12,
+    cruise: 12,
+    prevS: 7.6,
+  };
+  assert.equal(holdCarsForFoot([cruiser], [{ s: 10, offset: 0, radius: 0.5 }], 0.05), 0);
+  assert.equal(cruiser.s, 8.2, "a mounted can was treated as a person");
+  assert.equal(cruiser.speed, 12);
+
+  foot.offset = 4;
+  into.prevS = into.s;
+  holdCarsForFoot([into], [foot], 0.05);
+  assert.equal(into.footHold, false, "still held after the rider left the lane");
+
+  const halfL = 2.15;
+  const halfW = 0.95;
+  const carS = 12;
+  const overlaps = (s, offset) => {
+    const along = Math.max(Math.abs(s - carS) - halfL, 0);
+    const across = Math.max(Math.abs(offset) - halfW, 0);
+    return Math.hypot(along, across) < 0.45 - 0.02;
+  };
+  const state = createRideState(8);
+  state.eject = {
+    canS: 80,
+    canOffset: 6,
+    canSpeed: 0,
+    canLat: 0,
+    canHop: 0,
+    canVy: 0,
+    canSpin: 0,
+    canTilt: 0,
+    bodyS: 8,
+    bodyOffset: 0,
+    bodyAlong: 0,
+    bodyLat: 0,
+    bodyHop: 0,
+    bodyVy: 0,
+    bodySpin: 0,
+    bodyRoll: 0,
+    face: 0,
+  };
+  const car = {
+    id: "sedan",
+    kind: "car",
+    x: 0,
+    z: -carS,
+    halfL,
+    halfW,
+    fx: 0,
+    fz: -1,
+    rx: 1,
+    rz: 0,
+  };
+  for (let step = 0; step < 40; step += 1) {
+    const s = state.eject.bodyS;
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 1,
+      sample: {
+        x: 0,
+        y: 0,
+        z: -s,
+        s,
+        forward: { x: 0, y: 0, z: -1 },
+        right: { x: 1, y: 0, z: 0 },
+        halfWidth: 8,
+      },
+      hazards: [car],
+    });
+    assert.ok(state.eject, "walked back into the can");
+    assert.equal(overlaps(state.eject.bodyS, state.eject.bodyOffset), false, `step ${step} s ${state.eject.bodyS}`);
+  }
+  assert.ok(state.eject.bodyS < carS - halfL, `walked into the bumper at ${state.eject.bodyS}`);
+
+  state.eject.bodyS = carS;
+  state.eject.bodyOffset = 2.2;
+  state.eject.face = 0;
+  state.eject.bodyAlong = 0;
+  state.eject.bodyLat = 0;
+  for (let step = 0; step < 30; step += 1) {
+    const s = state.eject.bodyS;
+    stepRide(state, {
+      dt: 0.05,
+      steer: 0,
+      throttle: 0,
+      strafe: -1,
+      sample: {
+        x: 0,
+        y: 0,
+        z: -s,
+        s,
+        forward: { x: 0, y: 0, z: -1 },
+        right: { x: 1, y: 0, z: 0 },
+        halfWidth: 8,
+      },
+      hazards: [car],
+    });
+    assert.equal(overlaps(state.eject.bodyS, state.eject.bodyOffset), false, `side step ${step} offset ${state.eject.bodyOffset}`);
+  }
+  assert.ok(state.eject.bodyOffset > halfW, `sidestepped into the door at ${state.eject.bodyOffset}`);
+});
+
 test("space hops out of the can without a crash", () => {
   const course = createCourse(4);
   const state = createRideState(START_S);
@@ -1853,6 +2023,21 @@ test("a walker bends the forward knee and a tree is a cluster", () => {
   const handAt = new THREE.Vector3();
   person.userData.limbs.handR.getWorldPosition(handAt);
   assert.ok(handAt.z < -0.12, `ride hand ${handAt.z}`);
+
+  person.userData.pose = "talk";
+  person.userData.phase = 0;
+  let lifted = 0;
+  const idleAt = new THREE.Vector3();
+  for (let step = 0; step < 24; step += 1) {
+    animatePerson(person, step * 0.2);
+    person.updateMatrixWorld(true);
+    person.userData.limbs.handR.getWorldPosition(handAt);
+    person.userData.limbs.handL.getWorldPosition(idleAt);
+    assert.ok(handAt.z < -0.2, `talk hand behind the body ${handAt.z}`);
+    assert.ok(handAt.y > idleAt.y + 0.3, `talk hand down at the hip ${handAt.y}`);
+    if (handAt.y > 1.4) lifted += 1;
+  }
+  assert.ok(lifted > 2, `talk hand never rises ${lifted}`);
 
   const head = person.getObjectByName("person-head");
   assert.ok(head.geometry.getAttribute("position").count > 200, "head is a modeled mesh");

@@ -3,7 +3,8 @@ import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb
 import { createHudChatPanel } from "../node_modules/@rb/halo/src/ui/chat-panel.js";
 
 import { createSound } from "./audio.js";
-import { START_S } from "./constants.js";
+import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js";
+import { FOOT_RADIUS, START_S } from "./constants.js";
 import { createLobby } from "./lobby.js";
 import {
   canHostDevice,
@@ -125,6 +126,7 @@ const lobby = createLobby({
   onInvite: (actor) => { void beginInvite(actor); },
   onAccept: () => { void beginAccept(); },
   onBack: () => backToLobby(),
+  onLook: () => wearLook(),
   onName: (name) => {
     partyClient.setName(name);
     window.clearTimeout(namePublish);
@@ -260,7 +262,7 @@ window.addEventListener("blur", () => {
 
 window.addEventListener("keydown", (event) => {
   if (event.repeat) return;
-  if (chatFocused() || typingInDom()) return;
+  if (chatFocused() || typingInDom() || lobby.stylingOpen()) return;
   const key = String(event.key || "").toLowerCase();
   if (key === "v") cycleView();
   else if (key === "1") setView(0);
@@ -282,10 +284,20 @@ let navigation = null;
 let renderer = null;
 let controllers = null;
 
+const sound = createSound();
+let graphicsTyping = () => false;
+
 const boot = createSceneHudBootstrap({
   THREE,
   canvas,
-  isTyping: () => chatFocused() || typingInDom(),
+  rendererOptions: { powerPreference: "high-performance" },
+  isTyping: () => chatFocused() || typingInDom() || graphicsTyping() || lobby.stylingOpen(),
+  qualityCalibration: {
+    cap: 1,
+    onAudio(audio) {
+      sound.setMaster(audio.volume);
+    },
+  },
   rigOptions: {
     fov: 72,
     near: 0.08,
@@ -301,11 +313,12 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
-    hotbarSlotCount: 2,
+    hotbarSlotCount: 3,
     reserveSystemHotbarSlots: false,
     onHotbarSlot({ index }) {
       if (index === 0) cycleView();
       else if (index === 1) pressNew();
+      else if (index === 2) hudSystem?.toggleSettings();
     },
     onEnterVR() {
       const sample = sampleCourse(course, ride.s);
@@ -323,6 +336,9 @@ const boot = createSceneHudBootstrap({
   },
   configureRenderer(next) {
     next.toneMapping = THREE.NoToneMapping;
+    // A 2x framebuffer is four times the pixels. That alone keeps a 144 Hz
+    // panel from reaching 144 once the street is cheap enough to draw.
+    next.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
   },
   buildWorld({ scene }) {
     materials = createMaterials(THREE);
@@ -338,7 +354,7 @@ const boot = createSceneHudBootstrap({
 });
 
 ({ renderer, look, navigation, controllers } = boot);
-const sound = createSound();
+const quality = boot.quality;
 sound.attach(renderer);
 api.audio = () => sound.status();
 const { scene, camera } = boot;
@@ -360,17 +376,44 @@ hudSystem.setWindowHidden("help", true);
 hudSystem.setHotbarItems([
   { shortLabel: "CAM", iconText: "CAM", tooltip: "Cycle camera (V)" },
   { shortLabel: "NEW", iconText: "NEW", tooltip: "New hill (N)" },
+  { shortLabel: "GFX", iconText: "GFX", tooltip: "Graphics and sound" },
 ]);
+hudSystem.toggleSettings();
+if (typeof hudSystem.setWindowLines === "function") {
+  hudSystem.setWindowLines("settings", []);
+  const setWindowLines = hudSystem.setWindowLines.bind(hudSystem);
+  hudSystem.setWindowLines = (key, lines) => {
+    if (key === "settings") return;
+    setWindowLines(key, lines);
+  };
+}
+const graphicsPanel = quality
+  ? createGraphicsPanel({ THREE, hudSystem, calibration: quality, renderer })
+  : null;
+graphicsTyping = () => !!graphicsPanel?.isTyping();
+let settingsMoved = false;
+function placeSettings() {
+  const settingsWindow = hudSystem.hud?.ui?.windows?.settings;
+  const layoutW = Number(hudSystem.hud?.layoutW) || 0;
+  settingsMoved = nextSettingsPlacement(settingsWindow, layoutW, settingsMoved);
+}
 hudSystem.createWindow("race", {
   title: "HILL",
   x: 16,
   y: 16,
-  w: 320,
-  h: 260,
+  w: 420,
+  h: 430,
   closeable: false,
   minimizable: true,
   scrollable: false,
 });
+let hudSkin = null;
+function applyHudSkin(keys) {
+  if (!hudSystem?.loadWindowSkinTextures || !hudSystem?.applyWindowSkinToWindows) return;
+  if (!hudSkin) hudSkin = hudSystem.loadWindowSkinTextures("assets/hud/");
+  hudSystem.applyWindowSkinToWindows(keys, hudSkin, { cornerSize: 40 });
+}
+applyHudSkin(["race", "settings"]);
 
 function updateHud() {
   const view = VIEWS[viewIndex];
@@ -397,7 +440,9 @@ function updateHud() {
     lines.unshift("A/D strafe. Q/E turn. Drag walks. Space jumps.");
     lines.unshift("Get back in the can");
   } else {
-    lines.unshift("Space hops out of the can");
+    lines.unshift("Drag looks. V or 1 2 3 camera. N new hill.");
+    lines.unshift("X for auto walk. Space hops out of the can.");
+    lines.unshift("A/D strafe. W or Shift faster. S brakes.");
   }
   hudSystem.setWindowLines("race", lines);
 }
@@ -549,6 +594,17 @@ function fitHudToCamera() {
 }
 
 function sampleInput(presenting) {
+  // An open dresser holds the can. Throttle 0 only coasts, so a moving shell
+  // brakes until the panel closes. On foot, 0 plants the feet.
+  if (lobby.stylingOpen()) {
+    return {
+      steer: 0,
+      throttle: held() || ride.eject ? 0 : -1,
+      jump: false,
+      strafe: 0,
+      source: pending.source,
+    };
+  }
   if (held() || chatFocused() || typingInDom()) {
     return { steer: 0, throttle: 0, jump: false, strafe: 0, source: pending.source };
   }
@@ -703,8 +759,15 @@ function wearLook() {
   const key = lookKey(next);
   if (key === wornKey) return;
   const parent = rider.root.parent;
-  rider.root.removeFromParent();
+  const old = rider.root;
+  const position = old.position.clone();
+  const quaternion = old.quaternion.clone();
+  const scale = old.scale.clone();
+  old.removeFromParent();
   rider = createRider(THREE, materials, rideProps, next);
+  rider.root.position.copy(position);
+  rider.root.quaternion.copy(quaternion);
+  rider.root.scale.copy(scale);
   wornKey = key;
   if (parent) parent.add(rider.root);
 }
@@ -748,13 +811,14 @@ function openChat() {
     transport: partyClient.chatTransport(),
     key: "race-chat",
     title: "RIDERS",
-    x: 348,
+    x: 448,
     y: 16,
-    w: 280,
-    h: 180,
+    w: 360,
+    h: 260,
     composerHeight: 72,
     open: true,
   });
+  applyHudSkin(["race-chat"]);
   hudSystem.bringToFront("race");
 }
 
@@ -1273,8 +1337,9 @@ function tickBody(dt) {
     ? {
         s: ejectedNow.bodyS,
         offset: ejectedNow.bodyOffset,
-        radius: 0.45,
+        radius: FOOT_RADIUS,
         speed: Math.hypot(ejectedNow.bodyAlong || 0, ejectedNow.bodyLat || 0),
+        onFoot: true,
       }
     : { s: ride.s, offset: ride.offset, radius: 0.5, speed: ride.speed };
   if (ejectedNow) {
@@ -1284,6 +1349,21 @@ function tickBody(dt) {
       radius: 0.55,
       speed: Math.hypot(ejectedNow.canSpeed || 0, ejectedNow.canLat || 0),
     }];
+  }
+  if (partyMode === "host") {
+    const feet = [];
+    for (const entry of remoteRides.values()) {
+      const remote = entry.state.eject;
+      if (!remote) continue;
+      feet.push({
+        s: remote.bodyS,
+        offset: remote.bodyOffset,
+        radius: FOOT_RADIUS,
+        speed: Math.hypot(remote.bodyAlong || 0, remote.bodyLat || 0),
+        onFoot: true,
+      });
+    }
+    if (feet.length) body.feet = feet;
   }
   const focusS = ride.eject ? Math.max(ride.eject.bodyS, ride.eject.canS) : ride.s;
   let rideS = focusS;
@@ -1341,7 +1421,10 @@ function tickBody(dt) {
     hudTimer = 0;
     updateHud();
   }
+  graphicsPanel?.prepare();
   renderHudFrame({ renderer, scene, camera, dt: step, hudSystem, navigation });
+  graphicsPanel?.afterHud();
+  placeSettings();
   paintCountdown();
   pending = sampleInput(presenting);
   sendParty(step);

@@ -10,6 +10,7 @@ import { SITTER, animatePerson, createFlop, isStepping, poseForTravel, stepFlop 
 import {
   BUILDING_SETBACK,
   CHUNK_LENGTH,
+  FOOT_RADIUS,
   SIDEWALK_CENTER,
   START_S,
 } from "./constants.js";
@@ -168,7 +169,7 @@ export function stepVehicleWreck(car, dt) {
 // A stop copies the leader's speed onto the follower. Give cruise back once
 // the gap opens, or the first bus stop freezes that lane for good.
 export function recoverCruise(car, dt) {
-  if (!car || car.wreck || car.kind === "bus") return car;
+  if (!car || car.wreck || car.kind === "bus" || car.footHold) return car;
   const cruise = car.cruise || 0;
   const step = Math.max(0, Math.min(dt || 0, 0.05));
   car.speed += (cruise - (car.speed || 0)) * Math.min(1, step * 1.6);
@@ -617,6 +618,96 @@ export function trafficSwerve({ s, speed, laneOffset, halfWidth, player, actors,
   return { swerving, bias: offset - laneOffset, offset, life };
 }
 
+const FOOT_PAD = 0.06;
+
+function carTravel(car) {
+  if (car.wreck && Math.abs(car.wreck.along || 0) > 0.05) return Math.sign(car.wreck.along) || 1;
+  return Math.sign(car.speed || car.cruise || 1) || 1;
+}
+
+// Meters from the leading face to the rider, along travel.
+// Positive means the rider is still ahead of the bumper.
+function frontGap(car, foot, dir) {
+  const lead = (car.s || 0) + dir * (car.halfL || 2.15);
+  return ((foot.s || 0) - lead) * dir;
+}
+
+function inCarPath(car, foot) {
+  const radius = foot.radius ?? FOOT_RADIUS;
+  const lateral = Math.abs((foot.offset || 0) - (car.offset || 0));
+  return lateral < (car.halfW || 0.95) + radius;
+}
+
+// The bumper has reached the circle, or this step jumped over it.
+// Check: car s=8 speed>0, foot s=10 radius 0.45, halfL 2.15.
+// Bumper sits at 10.15, inside the circle. Stop s = 10 - 2.66 = 7.34.
+function carMeetsFoot(car, foot, prevS) {
+  if (!inCarPath(car, foot)) return null;
+  const dir = Math.sign((car.s || 0) - prevS) || carTravel(car);
+  const radius = foot.radius ?? FOOT_RADIUS;
+  const gapNow = frontGap(car, foot, dir);
+  const prevLead = prevS + dir * (car.halfL || 2.15);
+  const gapThen = ((foot.s || 0) - prevLead) * dir;
+  const hit = gapNow < radius + FOOT_PAD && gapNow > -radius;
+  const swept = gapThen > radius - 0.02 && gapNow < radius;
+  if (!hit && !swept) return null;
+  return { dir, stopS: foot.s - dir * ((car.halfL || 2.15) + radius + FOOT_PAD) };
+}
+
+// True while the rider is still just beyond the bumper, so cruise does not creep back in.
+function footStillBlocks(car, foot) {
+  if (!inCarPath(car, foot)) return false;
+  const gap = frontGap(car, foot, carTravel(car));
+  const radius = foot.radius ?? FOOT_RADIUS;
+  const lane = (car.halfW || 0.95) + radius * 0.25;
+  const lateral = Math.abs((foot.offset || 0) - (car.offset || 0));
+  return gap >= radius - 0.02 && gap < radius + 0.7 && lateral < lane;
+}
+
+// Stop a car short of an on-foot rider. A bumper stop, not a wreck.
+// The can in the rider's hand is not in this list. Alongside contact is left
+// to the rider, who is pushed out of the footprint in the drive step.
+export function holdCarsForFoot(cars, feet, dt = 0) {
+  const bodies = (Array.isArray(feet) ? feet : [feet]).filter((foot) => (
+    foot && foot.onFoot && Number.isFinite(foot.s)
+  ));
+  let held = 0;
+  const step = Math.max(0, dt || 0);
+  for (const car of cars || []) {
+    if (!car) continue;
+    if (!bodies.length) {
+      car.footHold = false;
+      continue;
+    }
+    const moved = (car.wreck ? (car.wreck.along || 0) : (car.speed || 0)) * step;
+    // prevS is the station before this step. Cruise recovery changes speed
+    // after the move, so a stored station wins over speed * dt.
+    const prevS = Number.isFinite(car.prevS) ? car.prevS : (car.s || 0) - moved;
+    let stop = null;
+    for (const foot of bodies) {
+      const meet = carMeetsFoot(car, foot, prevS);
+      if (!meet) continue;
+      if (!stop || (meet.stopS - stop.stopS) * meet.dir < 0) stop = meet;
+    }
+    if (stop) {
+      if ((car.s - stop.stopS) * stop.dir > 0) car.s = stop.stopS;
+      car.speed = 0;
+      if (car.wreck) car.wreck.along = 0;
+      car.footHold = true;
+      held += 1;
+      continue;
+    }
+    if (car.footHold && bodies.some((foot) => footStillBlocks(car, foot))) {
+      car.speed = 0;
+      if (car.wreck) car.wreck.along = 0;
+      held += 1;
+      continue;
+    }
+    car.footHold = false;
+  }
+  return held;
+}
+
 export function createTown(THREE, scene, materials, props) {
   const chunks = new Map();
   const hazards = [];
@@ -634,6 +725,7 @@ export function createTown(THREE, scene, materials, props) {
   const forestMat = materials.lambert(0x2c6a34, { flat: true });
 
   const cars = [];
+  const trafficDraws = props.createDrawSet(scene);
 
   function mark(w, h, d, material) {
     const mesh = new THREE.Mesh(box, material);
@@ -1117,17 +1209,37 @@ export function createTown(THREE, scene, materials, props) {
       addBlock(at, sidewalk, 0.95);
     }
 
-    // People, animals, and cones keep moving. Everything else in the chunk
-    // shares a material with its neighbors, so fold those into a few meshes.
-    for (const actor of actors) actor.group.userData.keep = true;
-    props.bake(root);
-    for (const actor of actors) delete actor.group.userData.keep;
+    // People keep their limbs and animate every frame. Animals and cones
+    // have no limbs, so they still fold into the chunk draw.
+    const draws = props.createDrawSet(scene);
+    for (const actor of actors) {
+      if (!actor.group) continue;
+      actor.group.userData.actor = true;
+      if (actor.group.userData.limbs) continue;
+      props.seal(actor.group);
+      draws.adopt(actor.group);
+    }
+    draws.finish();
+    root.userData.draws = draws;
+    props.compile(root);
+    for (const actor of actors) {
+      if (!actor.fixed) continue;
+      const host = actor.group.parent;
+      if (host && host !== root) {
+        host.updateMatrix();
+        host.matrixAutoUpdate = false;
+      }
+      actor.group.updateMatrix();
+      actor.group.matrixAutoUpdate = false;
+    }
 
     scene.add(root);
     return { index, s0, s1, root, actors, staticHazards, benches, solids };
   }
 
   function disposeRoot(root) {
+    root.userData.draws?.dispose();
+    root.userData.draws = null;
     root.traverse((object) => {
       const fx = object.userData?.exhaustFx;
       if (fx?.group) {
@@ -1159,7 +1271,8 @@ export function createTown(THREE, scene, materials, props) {
     for (let index = 0; index < fleet.length; index += 1) {
       const style = fleet[index];
       const oncoming = index % 2 === 1;
-      const mesh = props.createCar(rand, style);
+      const mesh = props.seal(props.createCar(rand, style));
+      trafficDraws.adopt(mesh);
       scene.add(mesh);
       const cruise = cruiseFor(mesh.userData.kind || "car", oncoming, rand);
       cars.push({
@@ -1180,6 +1293,7 @@ export function createTown(THREE, scene, materials, props) {
         served: null,
       });
     }
+    trafficDraws.finish();
   }
 
   function recycleCar(car, rideS, rand, pace) {
@@ -1202,6 +1316,7 @@ export function createTown(THREE, scene, materials, props) {
     car.wreck = null;
     car.striking = false;
     car.crash = null;
+    car.footHold = false;
     if (car.mesh?.userData?.smoke) car.mesh.userData.smoke.group.visible = false;
   }
 
@@ -1360,6 +1475,8 @@ export function createTown(THREE, scene, materials, props) {
     if (actor.group?.parent && actor.root && actor.group.parent !== actor.root) {
       actor.root.attach(actor.group);
     }
+    // A sitter is frozen with the bench. A hit has to move that group again.
+    if (actor.group) actor.group.matrixAutoUpdate = true;
     actor.fixed = false;
   }
 
@@ -1645,8 +1762,12 @@ export function createTown(THREE, scene, materials, props) {
     const rand = mulberry32(((course.seed + Math.floor(time * 10)) ^ 0x9e37) >>> 0);
     for (const car of cars) {
       if (car.s < viewS - 45 || car.s > viewS + 190) recycleCar(car, viewS, rand, player?.speed || 0);
+      car.prevS = car.s;
       if (car.wreck) {
         stepVehicleWreck(car, dt);
+      } else if (car.footHold) {
+        // Held last frame for a rider on foot. Stay put until they leave the lane.
+        car.speed = 0;
       } else if (car.kind === "bus") {
         const bench = nextBench(car);
         const pace = busPace({
@@ -1677,7 +1798,8 @@ export function createTown(THREE, scene, materials, props) {
         car.hold = 0;
         car.s += car.speed * dt;
       }
-      car.roll += Math.abs(car.speed) * dt * 1.6;
+      // Below a creep the cap is stopped. Ticking a still hub reads as spin.
+      if (Math.abs(car.speed) > 0.2) car.roll += Math.abs(car.speed) * dt * 1.6;
       flashLights(car.mesh.userData.lights, time);
     }
     for (const car of cars) recoverCruise(car, dt);
@@ -1733,6 +1855,23 @@ export function createTown(THREE, scene, materials, props) {
             }
           }
         }
+        if (!aim.swerving && player?.feet) {
+          for (const extra of player.feet) {
+            if (!extra?.onFoot) continue;
+            const next = trafficSwerve({
+              s: car.s,
+              speed: car.speed,
+              laneOffset,
+              halfWidth: sample.halfWidth,
+              player: extra,
+              actors: roadUsers,
+            });
+            if (next.swerving) {
+              aim = next;
+              break;
+            }
+          }
+        }
         striking = !aim.swerving && !!(aim.life && vehicleHitsLife(car.id, aim.life.id));
         if (striking) {
           aim = trafficSwerve({
@@ -1762,6 +1901,12 @@ export function createTown(THREE, scene, materials, props) {
       car.striking = striking;
     }
     collideSweptCars(cars, parkedBlocks);
+    const feet = [];
+    if (player?.onFoot && Number.isFinite(player.s)) feet.push(player);
+    for (const extra of player?.feet || []) {
+      if (extra?.onFoot && Number.isFinite(extra.s)) feet.push(extra);
+    }
+    holdCarsForFoot(cars, feet, dt);
     for (const car of cars) {
       const sample = sampleCourse(course, Math.max(0, car.s));
       const offset = car.offset || 0;
@@ -2008,6 +2153,9 @@ export function createTown(THREE, scene, materials, props) {
       }
     }
 
+    trafficDraws.sync();
+    for (const chunk of chunks.values()) chunk.root.userData.draws?.sync();
+
     hazards.length = count;
     return hazards;
   }
@@ -2030,6 +2178,7 @@ export function createTown(THREE, scene, materials, props) {
       car.wreck = null;
       car.striking = false;
       car.crash = null;
+      car.footHold = false;
       if (car.mesh?.userData?.smoke) car.mesh.userData.smoke.group.visible = false;
       if (car.mesh?.userData?.exhaustFx) car.mesh.userData.exhaustFx.group.visible = false;
     }

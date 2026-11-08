@@ -8,7 +8,7 @@
 // W walks along walkerForward.
 
 import { wrapAngle } from "./course.js";
-import { CAN_RADIUS, SHOULDER_REACH } from "./constants.js";
+import { CAN_RADIUS, FOOT_RADIUS, SHOULDER_REACH } from "./constants.js";
 
 const GRAVITY = 9.81;
 export const HARD_CRASH_SPEED = 9.5;
@@ -72,7 +72,8 @@ export function createRideState(s = 0) {
 }
 
 // Benches, trees, and other scenery shove a body out. They are not crashes.
-function shoveSolids(sample, s, offset, hazards) {
+// Cars use the same push with the on-foot radius, so a rider cannot walk through one.
+function shoveKind(sample, s, offset, hazards, kind, radius) {
   if (!sample || !hazards) return { s, offset };
   let nextS = s;
   let nextOffset = offset;
@@ -82,8 +83,8 @@ function shoveSolids(sample, s, offset, hazards) {
     let x = sample.x + sample.right.x * nextOffset + sample.forward.x * ds;
     let z = sample.z + sample.right.z * nextOffset + sample.forward.z * ds;
     for (const hazard of hazards) {
-      if (hazard.kind !== "solid") continue;
-      const hit = overlap(x, z, hazard);
+      if (!hazard || hazard.kind !== kind) continue;
+      const hit = overlap(x, z, hazard, radius);
       if (!hit) continue;
       const along = hit.px * forward.x + hit.pz * forward.z;
       const lateral = hit.px * sample.right.x + hit.pz * sample.right.z;
@@ -97,6 +98,14 @@ function shoveSolids(sample, s, offset, hazards) {
   return { s: nextS, offset: nextOffset };
 }
 
+function shoveSolids(sample, s, offset, hazards) {
+  return shoveKind(sample, s, offset, hazards, "solid", CAN_RADIUS);
+}
+
+function shoveFoot(sample, s, offset, hazards) {
+  return shoveKind(sample, s, offset, hazards, "car", FOOT_RADIUS);
+}
+
 function horizontalForward(sample) {
   const length = Math.hypot(sample.forward.x, sample.forward.z) || 1;
   return {
@@ -105,12 +114,12 @@ function horizontalForward(sample) {
   };
 }
 
-function overlap(canX, canZ, hazard) {
+function overlap(canX, canZ, hazard, radius = CAN_RADIUS) {
   const dx = canX - hazard.x;
   const dz = canZ - hazard.z;
   if (hazard.halfL == null) {
     const dist = Math.hypot(dx, dz);
-    const min = CAN_RADIUS + hazard.radius;
+    const min = radius + hazard.radius;
     if (dist >= min) return null;
     const scale = dist > 1e-5 ? 1 / dist : 1;
     return {
@@ -126,10 +135,10 @@ function overlap(canX, canZ, hazard) {
   if (overL >= 0 && overW >= 0) {
     if (overL < overW) {
       const sign = localL >= 0 ? 1 : -1;
-      return { px: sign * hazard.fx, pz: sign * hazard.fz, pen: overL + CAN_RADIUS };
+      return { px: sign * hazard.fx, pz: sign * hazard.fz, pen: overL + radius };
     }
     const sign = localW >= 0 ? 1 : -1;
-    return { px: sign * hazard.rx, pz: sign * hazard.rz, pen: overW + CAN_RADIUS };
+    return { px: sign * hazard.rx, pz: sign * hazard.rz, pen: overW + radius };
   }
   const clampedL = clamp(localL, -hazard.halfL, hazard.halfL);
   const clampedW = clamp(localW, -hazard.halfW, hazard.halfW);
@@ -138,12 +147,12 @@ function overlap(canX, canZ, hazard) {
   const ox = canX - closestX;
   const oz = canZ - closestZ;
   const dist = Math.hypot(ox, oz);
-  if (dist >= CAN_RADIUS) return null;
+  if (dist >= radius) return null;
   const scale = dist > 1e-5 ? 1 / dist : 1;
   return {
     px: (dist > 1e-5 ? ox : hazard.rx) * scale,
     pz: (dist > 1e-5 ? oz : hazard.rz) * scale,
-    pen: CAN_RADIUS - dist,
+    pen: radius - dist,
   };
 }
 
@@ -329,8 +338,10 @@ function stepEject(state, step, steer, throttle, jump, sample, hazards, canSampl
   eject.bodyOffset = clamp(eject.bodyOffset + strafeAcross * sidestep, -hard, hard);
   if (eject.bodyS < 0) eject.bodyS = 0;
   const bodyClear = shoveSolids(sample, eject.bodyS, eject.bodyOffset, hazards);
-  eject.bodyS = bodyClear.s;
-  eject.bodyOffset = bodyClear.offset;
+  const bodyCars = shoveFoot(sample, bodyClear.s, bodyClear.offset, hazards);
+  const bodyAgain = shoveSolids(sample, bodyCars.s, bodyCars.offset, hazards);
+  eject.bodyS = bodyAgain.s;
+  eject.bodyOffset = bodyAgain.offset;
   const canClear = shoveSolids(canSample || sample, eject.canS, eject.canOffset, hazards);
   eject.canS = canClear.s;
   eject.canOffset = canClear.offset;

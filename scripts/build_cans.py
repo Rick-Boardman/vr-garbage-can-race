@@ -161,6 +161,65 @@ def build_square(col):
     return obj
 
 
+def add_ring_xy(bm, z, rx, ry, segs):
+    ring = []
+    for index in range(segs):
+        angle = (index / segs) * math.tau
+        ring.append(bm.verts.new((math.cos(angle) * rx, math.sin(angle) * ry, z)))
+    return ring
+
+
+def lathe_shell(col, name, profile, rx=1.0, ry=1.0, segs=28, rim=None, hoops=()):
+    obj = replace_object(col, name)
+    bm = bmesh.new()
+    rings = [add_ring_xy(bm, z, radius * rx, radius * ry, segs) for z, radius in profile]
+    for lower, upper in zip(rings, rings[1:]):
+        bridge(bm, lower, upper)
+    center = bm.verts.new((0.0, 0.0, 0.02))
+    for index in range(segs):
+        nxt = (index + 1) % segs
+        bm.faces.new((center, rings[0][nxt], rings[0][index]))
+    if rim is not None:
+        add_torus(bm, (0.0, 0.0, rim[0]), rim[1], rim[2], "z", segs, 8)
+    for hoop_z, major, minor in hoops:
+        add_torus(bm, (0.0, 0.0, hoop_z), major, minor, "z", segs, 6)
+    finish(bm, obj)
+    return obj
+
+
+def build_drum(col):
+    profile = [
+        (0.0, 0.34), (0.05, 0.40), (0.12, 0.46), (0.28, 0.50),
+        (0.46, 0.52), (0.64, 0.50), (0.80, 0.46), (0.92, 0.44), (0.98, 0.47),
+    ]
+    return lathe_shell(col, "gcr-can-drum", profile, rim=(0.965, 0.455, 0.022), hoops=((0.16, 0.485, 0.016), (0.80, 0.475, 0.016)))
+
+
+def build_taper(col):
+    profile = [
+        (0.0, 0.30), (0.06, 0.33), (0.22, 0.36), (0.42, 0.40),
+        (0.62, 0.45), (0.80, 0.49), (0.92, 0.52), (0.99, 0.49),
+    ]
+    return lathe_shell(col, "gcr-can-taper", profile, rim=(0.955, 0.50, 0.024))
+
+
+def build_oval(col):
+    profile = [
+        (0.0, 0.34), (0.05, 0.38), (0.14, 0.44), (0.30, 0.46),
+        (0.48, 0.45), (0.66, 0.47), (0.82, 0.44),
+        (0.90, 0.46), (0.945, 0.50), (0.98, 0.45),
+    ]
+    return lathe_shell(col, "gcr-can-oval", profile, rx=1.18, ry=0.74)
+
+
+def build_flare(col):
+    profile = [
+        (0.0, 0.28), (0.06, 0.32), (0.20, 0.34), (0.42, 0.39),
+        (0.64, 0.46), (0.82, 0.52), (0.94, 0.55), (1.0, 0.50),
+    ]
+    return lathe_shell(col, "gcr-can-flare", profile, rim=(0.965, 0.53, 0.026))
+
+
 def three_arrays(obj):
     mesh = obj.data
     mesh.calc_loop_triangles()
@@ -213,6 +272,41 @@ def logo_z(positions):
     return best
 
 
+def band_extents(positions):
+    band_x = 0.36
+    band_z = 0.36
+    for index in range(0, len(positions), 3):
+        x, y, z = positions[index:index + 3]
+        if 0.55 <= y <= 0.70:
+            band_x = max(band_x, abs(x))
+            band_z = max(band_z, abs(z))
+    return band_x + 0.02, band_z + 0.02
+
+
+def foot_r(positions):
+    # The bottom cap has a center vertex. Measure the foot ring, not that point.
+    best = 0.2
+    for index in range(0, len(positions), 3):
+        x, y, z = positions[index:index + 3]
+        if y >= 0.1:
+            continue
+        radius = math.hypot(x, z)
+        if radius > 0.12:
+            best = max(best, radius)
+    return best * 0.82
+
+
+def mark_z(positions):
+    best = 0.2
+    for index in range(0, len(positions), 9):
+        cx = (positions[index] + positions[index + 3] + positions[index + 6]) / 3
+        cy = (positions[index + 1] + positions[index + 4] + positions[index + 7]) / 3
+        cz = (positions[index + 2] + positions[index + 5] + positions[index + 8]) / 3
+        if abs(cx) < 0.28 and 0.18 < cy < 0.52 and cz > best:
+            best = cz
+    return best
+
+
 def write_js(shells):
     def array(values):
         body = ",".join(f"{value:.5f}" for value in values)
@@ -227,6 +321,10 @@ def write_js(shells):
     for name, payload in shells.items():
         lines.append(f"  {name}: {{")
         lines.append(f"    logoZ: {payload['logoZ']:.5f},")
+        lines.append(f"    markZ: {payload['markZ']:.5f},")
+        lines.append(f"    bandX: {payload['bandX']:.5f},")
+        lines.append(f"    bandZ: {payload['bandZ']:.5f},")
+        lines.append(f"    footR: {payload['footR']:.5f},")
         lines.append(f"    positions: {array(payload['positions'])},")
         lines.append(f"    normals: {array(payload['normals'])},")
         lines.append("  },")
@@ -270,28 +368,59 @@ def face_normal_z(positions, normals):
 
 def main():
     col = collection()
-    round_can = build_round(col)
-    square_can = build_square(col)
+    built = [
+        ("round", build_round(col)),
+        ("square", build_square(col)),
+        ("drum", build_drum(col)),
+        ("taper", build_taper(col)),
+        ("oval", build_oval(col)),
+        ("flare", build_flare(col)),
+    ]
     shells = {}
     report = {}
-    for name, obj in ("round", round_can), ("square", square_can):
+    for name, obj in built:
         positions, normals = three_arrays(obj)
         outward = face_normal_z(positions, normals)
         if outward is None or outward < 0.35:
+            # A closed lathe sometimes comes out inside-out. Flip once and
+            # keep that winding. Recalculating again would flip it back.
+            mesh = obj.data
+            bm = bmesh.new()
+            bm.from_mesh(mesh)
+            bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
+            bm.normal_update()
+            for face in bm.faces:
+                face.smooth = True
+            bm.to_mesh(mesh)
+            bm.free()
+            for poly in mesh.polygons:
+                poly.use_smooth = True
+            mesh.update()
+            positions, normals = three_arrays(obj)
+            outward = face_normal_z(positions, normals)
+        if outward is None or outward < 0.35:
             raise RuntimeError(f"{name} logo face normal Z is {outward}")
+        band_x, band_z = band_extents(positions)
         shells[name] = {
             "positions": positions,
             "normals": normals,
             "logoZ": logo_z(positions),
+            "markZ": mark_z(positions),
+            "bandX": band_x,
+            "bandZ": band_z,
+            "footR": foot_r(positions),
         }
         report[name] = {
             "verts": len(positions) // 3,
-            "logoZ": shells[name]["logoZ"],
-            "normalZ": outward,
+            "logoZ": round(shells[name]["logoZ"], 4),
+            "markZ": round(shells[name]["markZ"], 4),
+            "band": [round(band_x, 4), round(band_z, 4)],
+            "footR": round(shells[name]["footR"], 4),
+            "normalZ": round(outward, 3),
         }
     write_js(shells)
-    report["roundGlb"] = export_glb([round_can], "round.glb")
-    report["squareGlb"] = export_glb([square_can], "square.glb")
+    for name, obj in built:
+        report[f"{name}Glb"] = export_glb([obj], f"{name}.glb")
     global result
     result = report
 
