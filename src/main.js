@@ -46,7 +46,6 @@ import { createTown } from "./town.js";
 import { VIEWS, viewIndexFor, vrFootAnchor, vrViewAnchor } from "./views.js";
 import { layoutVrChrome } from "./vr-chrome.js";
 import {
-  faceFromHead,
   footDragStick,
   footStrafe,
   inputFromHands,
@@ -54,6 +53,7 @@ import {
   inputFromLook,
   inputFromTilt,
   inputFromVrStick,
+  inputFromVrTurn,
   onFootJump,
   onFootSteer,
   selectRideInput,
@@ -111,7 +111,6 @@ let vrChromeOn = false;
 let vrDesktop = null;
 let vrHelpWanted = false;
 const stickLocks = new WeakMap();
-const headDir = new THREE.Vector3();
 let head = null;
 let lastHeading = null;
 let yawAtFrameEnd = null;
@@ -240,12 +239,12 @@ function readHands(controllers, camera) {
   });
 }
 
-function readLeftStick(session) {
+function readGamepadStick(session, handedness) {
   const sources = session?.inputSources;
   if (!sources) return null;
   let gamepad = null;
   for (const source of sources) {
-    if (source?.handedness === "left" && source.gamepad?.axes?.length >= 2) {
+    if (source?.handedness === handedness && source.gamepad?.axes?.length >= 2) {
       gamepad = source.gamepad;
       break;
     }
@@ -254,7 +253,10 @@ function readLeftStick(session) {
   const pair = vrStickPair(gamepad.axes, stickLocks.get(gamepad));
   if (!pair) return null;
   if (pair.lock) stickLocks.set(gamepad, pair.index);
-  return inputFromVrStick(gamepad.axes[pair.index] || 0, gamepad.axes[pair.index + 1] || 0);
+  return {
+    x: gamepad.axes[pair.index] || 0,
+    y: gamepad.axes[pair.index + 1] || 0,
+  };
 }
 
 function onOrientation(event) {
@@ -474,8 +476,8 @@ hudSystem.setHelpOverrideLines([
   "Enter VR is the button at the top right.",
   "Lower the left controller to steer left, the right to steer right.",
   "Lower both controllers to speed up. Raise them to lean back and brake.",
-  "Out of the can, the left stick walks the way you look.",
-  "Stick right steps to your right. X or A jumps.",
+  "Out of the can, the left stick walks and strafes.",
+  "The right stick turns the view. X or A jumps.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -740,10 +742,11 @@ function placeWorld(presenting) {
     ? walkerForward(posed.forward, posed.right, ejected.face || 0)
     : null;
   const courseHeading = headingYaw(posed.forward.x, posed.forward.z);
-  // The headset pose is parented to this rig. Yaw the rig to the course
-  // while presenting, and let the pose carry the look. Yawing the rig to
-  // the head as well turns the picture twice.
-  const heading = facing && !presenting
+  // On foot, eject.face is the view and the walk. The right stick owns it.
+  // The headset pose is parented to this rig, so the rig yaws to that face
+  // and the pose only adds the head. Copying the headset yaw into the face
+  // would turn the picture twice. In the can, the rig stays on the course.
+  const heading = facing
     ? headingYaw(facing.x, facing.z)
     : courseHeading;
   // A touch drag holds its pitch for the whole press. Zeroing it here
@@ -925,26 +928,27 @@ function sampleInput(presenting) {
     keys.strafe = 0;
   }
   if (finger && keys.throttle === 0) keys.throttle = finger.throttle;
-  const vrStick = presenting && ride.eject ? readLeftStick(renderer.xr.getSession?.()) : null;
+  const session = presenting && ride.eject ? renderer.xr.getSession?.() : null;
+  const leftStick = session ? readGamepadStick(session, "left") : null;
+  const rightStick = session ? readGamepadStick(session, "right") : null;
+  const vrStick = leftStick ? inputFromVrStick(leftStick.x, leftStick.y) : null;
   const selected = selectRideInput({
     presenting,
     ejected: !!ride.eject,
     hands: presenting ? readHands(controllers, camera) : null,
     vrStick,
+    vrTurn: rightStick ? rightStick.x : 0,
     tilt: finger ? null : latestTilt,
     keys,
     preferTilt: !finger && isCoarse() && !!latestTilt,
   });
   selected.jump = onFootJump(navigation.keysDown);
-  if (presenting && ride.eject && vrJumpDown(renderer.xr.getSession?.()?.inputSources)) {
+  if (presenting && ride.eject && vrJumpDown(session?.inputSources)) {
     selected.jump = true;
   }
   selected.strafe = footStrafe(selected.source, !!ride.eject, keys.strafe, selected.strafe);
-  if (presenting && ride.eject && posed) {
-    camera.getWorldDirection(headDir);
-    const face = faceFromHead(headDir.x, headDir.z, posed.forward, posed.right);
-    if (face != null) ride.eject.face = face;
-    selected.steer = 0;
+  if (presenting && ride.eject && selected.source !== "vr-walk") {
+    selected.steer = inputFromVrTurn(rightStick ? rightStick.x : 0);
   }
   return selected;
 }

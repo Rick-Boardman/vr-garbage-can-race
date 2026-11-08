@@ -67,6 +67,14 @@ export function inputFromHands({ leftY, rightY, headY }) {
 
 // On foot in the headset. WebXR stick forward is negative Y.
 // Check: x 0, y -1 → throttle 1, strafe 0. x 1, y 0 → throttle 0, strafe 1.
+// The right stick is turn, not strafe. x 1 → steer 1, which grows face
+// toward sample.right. x -1 turns left.
+export function inputFromVrTurn(x) {
+  const sx = Number.isFinite(x) ? x : 0;
+  if (Math.abs(sx) < 0.18) return 0;
+  return clamp(sx, -1, 1);
+}
+
 export function inputFromVrStick(x, y) {
   const sx = Number.isFinite(x) ? x : 0;
   const sy = Number.isFinite(y) ? y : 0;
@@ -171,8 +179,10 @@ export function footStrafe(source, ejected, keyStrafe, stickStrafe) {
   return ejected ? (keyStrafe || 0) : 0;
 }
 
-export function selectRideInput({ presenting, ejected = false, hands, tilt, keys, preferTilt = false, vrStick = null }) {
-  if (presenting && ejected && vrStick) return { ...vrStick, source: "vr-walk", steer: 0 };
+export function selectRideInput({ presenting, ejected = false, hands, tilt, keys, preferTilt = false, vrStick = null, vrTurn = 0 }) {
+  if (presenting && ejected && vrStick) {
+    return { ...vrStick, source: "vr-walk", steer: inputFromVrTurn(vrTurn) };
+  }
   if (presenting && hands) return { ...hands, source: "vr" };
   const keyActive = !!keys && (keys.steer !== 0 || keys.throttle !== 0 || (keys.strafe || 0) !== 0);
   // A phone wants tilt even while a key is down. On a desktop, held keys win

@@ -7,6 +7,7 @@ import {
   faceFromHead,
   footStrafe,
   inputFromVrStick,
+  inputFromVrTurn,
   selectRideInput,
   vrJumpDown,
   vrStickPair,
@@ -87,6 +88,30 @@ test("the left stick walks and strafes, and the ride lean still wins in the can"
 
   assert.equal(vrJumpDown([{ gamepad: { buttons: [{ pressed: true }] } }]), false);
   assert.equal(vrJumpDown([{ gamepad: { buttons: [null, null, null, null, { pressed: true }] } }]), true);
+
+  assert.equal(inputFromVrTurn(1), 1);
+  assert.equal(inputFromVrTurn(-1), -1);
+  assert.equal(inputFromVrTurn(0.05), 0);
+  const turned = selectRideInput({
+    presenting: true,
+    ejected: true,
+    hands,
+    vrStick: ahead,
+    vrTurn: 1,
+    keys,
+  });
+  assert.equal(turned.source, "vr-walk");
+  assert.equal(turned.steer, 1);
+  assert.equal(turned.throttle, 1);
+  const stillInCan = selectRideInput({
+    presenting: true,
+    hands,
+    vrStick: ahead,
+    vrTurn: 1,
+    keys,
+  });
+  assert.equal(stillInCan.source, "vr");
+  assert.equal(stillInCan.steer, hands.steer);
 });
 
 test("stick forward at face π/2 walks toward the right, and the standing eye is not buried", () => {
@@ -123,9 +148,32 @@ test("stick forward at face π/2 walks toward the right, and the standing eye is
   assert.equal(state.eject.face, face);
   assert.ok(state.eject.bodyOffset > offset + 0.1, `offset ${state.eject.bodyOffset} from ${offset}`);
 
-  const origin = { x: 3, y: 2, z: -4 };
-  const right = { x: 1, y: 0, z: 0 };
   const forward = { x: 0, y: 0, z: -1 };
+  const right = { x: 1, y: 0, z: 0 };
+  const swung = walkerForward(forward, right, 0.4);
+  assert.ok(swung.x > 0.3 && swung.z < -0.8, `swung ${swung.x},${swung.z}`);
+
+  state.eject.face = 0;
+  state.eject.bodyAlong = 0;
+  state.eject.bodyLat = 0;
+  state.eject.bodyHop = 0;
+  state.eject.bodyVy = 0;
+  state.eject.canS = state.eject.bodyS + 40;
+  stepRide(state, {
+    dt: 0.05,
+    steer: 1,
+    throttle: 0,
+    strafe: 0,
+    sample: sampleCourse(course, state.s),
+    hazards: [],
+  });
+  assert.ok(state.eject.face > 0.1, `face ${state.eject.face}`);
+  const stood = sampleCourse(course, state.eject.bodyS);
+  const look = walkerForward(stood.forward, stood.right, state.eject.face);
+  const across = look.x * stood.right.x + look.z * stood.right.z;
+  assert.ok(across > 0, `right stick turned across ${across}`);
+
+  const origin = { x: 3, y: 2, z: -4 };
   const floor = vrFootAnchor(origin, right, forward, 1.2);
   assert.equal(floor.x, origin.x);
   assert.equal(floor.y, origin.y);
