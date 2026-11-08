@@ -15,6 +15,8 @@ export function createHotbarIcons(THREE) {
     help: paint(THREE, drawHelp),
     lobby: paint(THREE, drawLobby),
     style: paint(THREE, drawStyle),
+    start: paint(THREE, drawStart),
+    leave: paint(THREE, drawLeave),
   };
 }
 
@@ -130,6 +132,38 @@ function drawLobby(ctx) {
   ctx.fillStyle = INK;
   ctx.beginPath();
   ctx.arc(72, 74, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawStart(ctx) {
+  ctx.fillStyle = BRASS;
+  ctx.beginPath();
+  ctx.moveTo(44, 28);
+  ctx.lineTo(98, 64);
+  ctx.lineTo(44, 100);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawLeave(ctx) {
+  ctx.strokeStyle = BRASS;
+  ctx.lineWidth = 8;
+  round(ctx, 24, 22, 48, 84, 6);
+  ctx.stroke();
+  ctx.fillStyle = BRASS;
+  ctx.beginPath();
+  ctx.arc(58, 66, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(80, 64);
+  ctx.lineTo(108, 64);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(108, 64);
+  ctx.lineTo(92, 50);
+  ctx.lineTo(92, 78);
+  ctx.closePath();
   ctx.fill();
 }
 

@@ -55,10 +55,6 @@
       #lobby-invite[hidden],
       #lobby-solo[hidden],
       #start-countdown[hidden],
-      #hill-bar[hidden],
-      #hill-start[hidden],
-      #hill-leave[hidden],
-      #hill-wait[hidden],
       #play-style[hidden] {
         display: none !important;
       }
@@ -170,9 +166,7 @@
       }
       #lobby button,
       #play-style button,
-      #lobby-invite button,
-      #hill-start,
-      #hill-leave {
+      #lobby-invite button {
         margin: 4px 8px 4px 0;
         padding: 8px 12px;
         border: 0;
@@ -389,21 +383,6 @@
         font: 96px/1 system-ui, sans-serif;
         text-shadow: 0 2px 0 #14110e;
       }
-      #hill-bar {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 17;
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 8px;
-        max-width: min(560px, calc(100% - 32px));
-      }
-      #hill-start,
-      #hill-leave {
-        margin: 0;
-      }
       #play-style {
         position: fixed;
         top: 64px;
@@ -438,22 +417,6 @@
       #play-style-body {
         min-height: 0;
         overflow: auto;
-      }
-      #hill-wait {
-        position: fixed;
-        left: 50%;
-        bottom: 72px;
-        z-index: 17;
-        transform: translateX(-50%);
-        max-width: min(720px, calc(100% - 48px));
-        margin: 0;
-        padding: 10px 14px;
-        border-radius: 10px;
-        background: rgba(20, 17, 14, 0.82);
-        color: #f3ead7;
-        font: 16px/1.35 system-ui, sans-serif;
-        text-align: center;
-        pointer-events: none;
       }
       @media (max-width: 800px) {
         #lobby {

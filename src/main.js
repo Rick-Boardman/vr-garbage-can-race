@@ -53,7 +53,9 @@ const HOTBAR = {
   settings: 2,
   style: 3,
   help: 4,
-  lobby: 5,
+  start: 5,
+  leave: 6,
+  lobby: 7,
 };
 const VIEWS = [
   { id: "first", name: "first person", pivot: 1.62, cam: [0, 0, 0.12], pitch: -0.22, showPerson: false },
@@ -109,6 +111,7 @@ let hudSystem = null;
 let remotes = null;
 let partyMode = "";
 let gate = "lobby";
+let hillNote = "";
 let heldStartsAt = "";
 let heldCode = "";
 let sawSnapshot = false;
@@ -327,7 +330,7 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
-    hotbarSlotCount: 6,
+    hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
     onHotbarSlot({ index }) {
       if (index === HOTBAR.camera) cycleView();
@@ -335,7 +338,11 @@ const boot = createSceneHudBootstrap({
       else if (index === HOTBAR.settings) toggleGraphics();
       else if (index === HOTBAR.style) lobby.toggleStyle();
       else if (index === HOTBAR.help) hudSystem?.toggleHelp();
-      else if (index === HOTBAR.lobby) backToLobby();
+      else if (index === HOTBAR.start) {
+        if (gate === "waiting" && partyMode === "host") void beginSeal();
+      } else if (index === HOTBAR.leave) {
+        if (partyMode === "host" || partyMode === "player") beginLeave();
+      } else if (index === HOTBAR.lobby) backToLobby();
     },
     onEnterVR() {
       const sample = sampleCourse(course, ride.s);
@@ -411,6 +418,8 @@ hudSystem.setHotbarItems([
   { shortLabel: "GFX", tooltip: "Graphics and sound", iconTexture: hotbarIcons.gear, showNumber: false },
   { shortLabel: "STYLE", tooltip: "Character styling", iconTexture: hotbarIcons.style, showNumber: false },
   { shortLabel: "HELP", tooltip: "How to play", iconTexture: hotbarIcons.help, showNumber: false },
+  { shortLabel: "START", tooltip: "Start the countdown", iconTexture: hotbarIcons.start, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
+  { shortLabel: "LEAVE", tooltip: "Leave the room", iconTexture: hotbarIcons.leave, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
   { shortLabel: "LOBBY", tooltip: "Lobby", iconTexture: hotbarIcons.lobby, showNumber: false },
 ]);
 // Settings boots off the screen. Opening it here is what put GRAPHICS up
@@ -418,9 +427,9 @@ hudSystem.setHotbarItems([
 if (typeof hudSystem.setWindowLines === "function") {
   hudSystem.setWindowLines("settings", []);
   const setWindowLines = hudSystem.setWindowLines.bind(hudSystem);
-  hudSystem.setWindowLines = (key, lines) => {
+  hudSystem.setWindowLines = (key, lines, options) => {
     if (key === "settings") return;
-    setWindowLines(key, lines);
+    setWindowLines(key, lines, options);
   };
 }
 const graphicsPanel = quality
@@ -470,6 +479,7 @@ function placeSettings() {
   if (items[HOTBAR.settings]) items[HOTBAR.settings].active = graphicsOpen();
   if (items[HOTBAR.style]) items[HOTBAR.style].active = lobby.styleOpen();
   if (items[HOTBAR.help]) items[HOTBAR.help].active = helpOpen();
+  syncHillSlots(items);
 }
 let helpPlaced = false;
 function helpWindow() {
@@ -478,6 +488,22 @@ function helpWindow() {
 function helpOpen() {
   const win = helpWindow();
   return !!win && win.y > -1000;
+}
+function syncHillSlots(items) {
+  const canStart = gate === "waiting" && partyMode === "host";
+  const canLeave = partyMode === "host" || partyMode === "player";
+  const start = items[HOTBAR.start];
+  const leave = items[HOTBAR.leave];
+  if (start) {
+    start.interactive = canStart;
+    start.bgOpacity = canStart ? 0.98 : 0.34;
+    start.outlineOpacity = canStart ? 0.98 : 0.28;
+  }
+  if (leave) {
+    leave.interactive = canLeave;
+    leave.bgOpacity = canLeave ? 0.98 : 0.34;
+    leave.outlineOpacity = canLeave ? 0.98 : 0.28;
+  }
 }
 function placeHelp() {
   if (helpPlaced) return;
@@ -569,6 +595,11 @@ function updateHud() {
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
     `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}`,
   );
+  if (hillNote) {
+    for (const line of hillNote.split("\n")) {
+      if (line) lines.push(line);
+    }
+  }
   hudSystem.setWindowLines("race", lines);
 }
 
@@ -967,6 +998,7 @@ function leaveParty(message, { tellHost = false } = {}) {
     lobby.setRoom(null);
     lobby.setSlots([]);
     lobby.show();
+    hillNote = "";
     lobby.setHillChrome("none");
     lobby.bindChat(partyClient.lobbyTransport());
     if (message) lobby.setStatus(message);
@@ -977,16 +1009,17 @@ function leaveParty(message, { tellHost = false } = {}) {
 
 function showHill(chrome, note = "") {
   lobby.hide();
-  lobby.setHillChrome(chrome, note);
+  hillNote = typeof note === "string" ? note : "";
+  lobby.setHillChrome(chrome);
 }
 
 function waitingNote() {
   const code = partyClient.code;
   if (gate !== "waiting" || !code) return "";
   if (partyMode === "host") {
-    return `Waiting at the start line. Others join with ${code}. Press Start when you want to go.`;
+    return `Waiting at the start line. Others join with ${code}.\nThe start slot begins the ride.`;
   }
-  return `Waiting at the start line. The host starts ${code}.`;
+  return `Waiting at the start line.\nThe host starts ${code}.`;
 }
 
 function hillChrome() {
@@ -1008,6 +1041,7 @@ function backToLobby() {
   if (partyMode) leaveParty("", { tellHost: true });
   gate = "lobby";
   holdAtLine(ride, START_S);
+  hillNote = "";
   lobby.setCountdown("");
   lobby.show();
   lobby.setHillChrome("none");
@@ -1034,8 +1068,9 @@ function paintCountdown() {
 function releaseLine() {
   if (gate !== "countdown") return;
   gate = "racing";
+  hillNote = "";
   lobby.setCountdown("");
-  lobby.setHillChrome("leave", "");
+  lobby.setHillChrome("leave");
   if (!ride.eject) ride.speed = createRideState(START_S).speed;
   for (const entry of remoteRides.values()) {
     if (entry.stick && entry.lastStickAt === 0) {
@@ -1163,6 +1198,7 @@ function failBackToLobby(message) {
   heldCode = "";
   chatPanel?.dispose();
   chatPanel = null;
+  hillNote = "";
   lobby.setRoom(null);
   lobby.show();
   lobby.bindChat(partyClient.lobbyTransport());
@@ -1184,7 +1220,10 @@ async function beginSeal() {
   } catch (error) {
     const message = error?.message || "Could not start.";
     lobby.setStatus(message);
-    if (gate === "waiting") lobby.setHillChrome(hillChrome(), message);
+    if (gate === "waiting") {
+      hillNote = message;
+      lobby.setHillChrome(hillChrome());
+    }
   }
 }
 

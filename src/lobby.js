@@ -248,25 +248,6 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   countdown.id = "start-countdown";
   countdown.hidden = true;
 
-  const hillStart = document.createElement("button");
-  hillStart.type = "button";
-  hillStart.id = "hill-start";
-  hillStart.textContent = "Start";
-  hillStart.title = "Start the countdown now, even if a slot is still open.";
-  hillStart.hidden = true;
-  const hillLeave = document.createElement("button");
-  hillLeave.type = "button";
-  hillLeave.id = "hill-leave";
-  hillLeave.textContent = "Leave";
-  hillLeave.hidden = true;
-  const hillBar = document.createElement("div");
-  hillBar.id = "hill-bar";
-  hillBar.hidden = true;
-  hillBar.append(hillStart, hillLeave);
-  const hillWait = document.createElement("p");
-  hillWait.id = "hill-wait";
-  hillWait.hidden = true;
-
   const playStyleTitle = document.createElement("p");
   playStyleTitle.textContent = "Character styling";
   const playStyleClose = document.createElement("button");
@@ -284,7 +265,7 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   playStyle.append(playStyleHead, playStyleBody);
   playStyleClose.addEventListener("click", () => closePlayStyle());
 
-  document.body.append(shell, banner, countdown, hillWait, hillBar, playStyle);
+  document.body.append(shell, banner, countdown, playStyle);
 
   let chatUnsub = null;
   let chatTransport = null;
@@ -302,8 +283,6 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   leaveButton.addEventListener("click", () => onLeave?.());
   aloneButton.addEventListener("click", () => onAlone?.());
   soloButton.addEventListener("click", () => onAlone?.());
-  hillStart.addEventListener("click", () => onSeal?.());
-  hillLeave.addEventListener("click", () => onLeave?.());
   acceptButton.addEventListener("click", () => onAccept?.());
   declineButton.addEventListener("click", () => {
     pendingInvite = null;
@@ -529,14 +508,8 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     setup.append(dresser);
   }
 
-  function setHillChrome(which, note) {
-    hillStart.hidden = which !== "host";
-    hillLeave.hidden = which !== "leave" && which !== "host";
-    hillBar.hidden = hillStart.hidden && hillLeave.hidden;
+  function setHillChrome(which) {
     if (which === "none") closePlayStyle();
-    const text = typeof note === "string" ? note : "";
-    hillWait.hidden = text === "";
-    hillWait.textContent = text;
   }
 
   function setCountdown(text) {
