@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb/halo";
 import { createHudChatPanel } from "../node_modules/@rb/halo/src/ui/chat-panel.js";
+import {
+  HUD_LAYOUT_DEFAULT_HEIGHT_PX,
+  HUD_LAYOUT_DEFAULT_WIDTH_PX,
+} from "../node_modules/@rb/halo/src/hud-layout-policy.js";
 
 import { createSound } from "./audio.js";
 import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js";
@@ -39,17 +43,23 @@ import { createProps } from "./props.js";
 import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
-import { VIEWS, viewIndexFor, vrViewAnchor } from "./views.js";
+import { VIEWS, viewIndexFor, vrFootAnchor, vrViewAnchor } from "./views.js";
+import { layoutVrChrome } from "./vr-chrome.js";
 import {
+  faceFromHead,
   footDragStick,
+  footStrafe,
   inputFromHands,
   inputFromKeys,
   inputFromLook,
   inputFromTilt,
+  inputFromVrStick,
   onFootJump,
   onFootSteer,
   selectRideInput,
   tiltAxes,
+  vrJumpDown,
+  vrStickPair,
 } from "./input.js";
 
 const BEST_KEY = "garbage-can-race-best";
@@ -97,6 +107,11 @@ let seenBump = 0;
 ride.best = readBest();
 let viewIndex = viewIndexFor(viewParam);
 let vrSeatEye = null;
+let vrChromeOn = false;
+let vrDesktop = null;
+let vrHelpWanted = false;
+const stickLocks = new WeakMap();
+const headDir = new THREE.Vector3();
 let head = null;
 let lastHeading = null;
 let yawAtFrameEnd = null;
@@ -223,6 +238,23 @@ function readHands(controllers, camera) {
     rightY: worldY(right),
     headY: worldY(camera),
   });
+}
+
+function readLeftStick(session) {
+  const sources = session?.inputSources;
+  if (!sources) return null;
+  let gamepad = null;
+  for (const source of sources) {
+    if (source?.handedness === "left" && source.gamepad?.axes?.length >= 2) {
+      gamepad = source.gamepad;
+      break;
+    }
+  }
+  if (!gamepad) return null;
+  const pair = vrStickPair(gamepad.axes, stickLocks.get(gamepad));
+  if (!pair) return null;
+  if (pair.lock) stickLocks.set(gamepad, pair.index);
+  return inputFromVrStick(gamepad.axes[pair.index] || 0, gamepad.axes[pair.index + 1] || 0);
 }
 
 function onOrientation(event) {
@@ -352,7 +384,10 @@ const boot = createSceneHudBootstrap({
       else if (index === HOTBAR.course) pressNew();
       else if (index === HOTBAR.settings) toggleGraphics();
       else if (index === HOTBAR.style) lobby.toggleStyle();
-      else if (index === HOTBAR.help) hudSystem?.toggleHelp();
+      else if (index === HOTBAR.help) {
+        if (renderer?.xr?.isPresenting) vrHelpWanted = !helpOpen();
+        hudSystem?.toggleHelp();
+      }
       else if (index === HOTBAR.start) {
         if (gate === "waiting" && partyMode === "host") void beginSeal();
       } else if (index === HOTBAR.leave) {
@@ -439,6 +474,8 @@ hudSystem.setHelpOverrideLines([
   "Enter VR is the button at the top right.",
   "Lower the left controller to steer left, the right to steer right.",
   "Lower both controllers to speed up. Raise them to lean back and brake.",
+  "Out of the can, the left stick walks the way you look.",
+  "Stick right steps to your right. X or A jumps.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -514,6 +551,42 @@ function placeSettings() {
   if (items[HOTBAR.style]) items[HOTBAR.style].active = lobby.styleOpen();
   if (items[HOTBAR.help]) items[HOTBAR.help].active = helpOpen();
   syncHillSlots(items);
+}
+function holdVrPanels() {
+  const ui = hudSystem?.hud?.ui;
+  // Halo grids every open panel across the headset. That covers the road.
+  if (ui) ui._vrAutoLayoutDone = true;
+  layoutVrChrome({
+    windows: ui?.windows,
+    layoutW: HUD_LAYOUT_DEFAULT_WIDTH_PX,
+    layoutH: HUD_LAYOUT_DEFAULT_HEIGHT_PX,
+    helpWanted: vrHelpWanted,
+    settingsWanted,
+  });
+}
+function captureVrDesktop() {
+  const windows = hudSystem?.hud?.ui?.windows;
+  if (!windows) return;
+  const saved = {};
+  for (const key of Object.keys(windows)) {
+    const win = windows[key];
+    if (!win) continue;
+    saved[key] = { x: win.x, y: win.y };
+  }
+  vrDesktop = saved;
+}
+function restoreVrDesktop() {
+  const windows = hudSystem?.hud?.ui?.windows;
+  const saved = vrDesktop;
+  vrDesktop = null;
+  if (!windows || !saved) return;
+  for (const key of Object.keys(saved)) {
+    const win = windows[key];
+    const spot = saved[key];
+    if (!win || !spot) continue;
+    win.x = spot.x;
+    win.y = spot.y;
+  }
 }
 let helpPlaced = false;
 function helpWindow() {
@@ -666,9 +739,13 @@ function placeWorld(presenting) {
   const facing = ejected
     ? walkerForward(posed.forward, posed.right, ejected.face || 0)
     : null;
-  const heading = facing
+  const courseHeading = headingYaw(posed.forward.x, posed.forward.z);
+  // The headset pose is parented to this rig. Yaw the rig to the course
+  // while presenting, and let the pose carry the look. Yawing the rig to
+  // the head as well turns the picture twice.
+  const heading = facing && !presenting
     ? headingYaw(facing.x, facing.z)
-    : headingYaw(posed.forward.x, posed.forward.z);
+    : courseHeading;
   // A touch drag holds its pitch for the whole press. Zeroing it here
   // threw the walk stick away before sampleInput could read it.
   const fingerDown = ejected && !presenting && dragging && dragIsTouch;
@@ -723,7 +800,7 @@ function placeWorld(presenting) {
       bodySpin: ejected.bodySpin || 0,
       bodyRoll: ejected.bodyRoll || 0,
       facing,
-      showPerson: view.showPerson,
+      showPerson: presenting ? false : view.showPerson,
       moving: Math.hypot(pending.throttle || 0, pending.strafe || 0) > 0.08
         || Math.hypot(ejected.bodyAlong || 0, ejected.bodyLat || 0) > 0.35,
     });
@@ -746,17 +823,25 @@ function placeWorld(presenting) {
       if (vrSeatEye == null) vrSeatEye = sensed;
       else if (vrSeatEye === 0 && Math.abs(sensed) > 0.2) vrSeatEye = sensed;
     }
-    const originY = posed.y + shoulder + view.pivot + viewHop;
-    const eye = vrViewAnchor(
-      { x: followX, y: originY, z: followZ },
-      posed.right,
-      posed.forward,
-      view.cam,
-      view.pitch,
-      vrSeatEye ?? 0,
-    );
+    const onFoot = !!ejected;
+    const pitch = onFoot ? 0 : view.pitch;
+    const eye = onFoot
+      ? vrFootAnchor(
+        { x: followX, y: posed.y + shoulder + viewHop, z: followZ },
+        posed.right,
+        posed.forward,
+        vrSeatEye ?? 0,
+      )
+      : vrViewAnchor(
+        { x: followX, y: posed.y + shoulder + view.pivot + viewHop, z: followZ },
+        posed.right,
+        posed.forward,
+        view.cam,
+        view.pitch,
+        vrSeatEye ?? 0,
+      );
     player.position.set(eye.x, eye.y, eye.z);
-    if (head) head.rotation.set(view.pitch, 0, 0);
+    if (head) head.rotation.set(pitch, 0, 0);
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
   } else {
@@ -840,15 +925,27 @@ function sampleInput(presenting) {
     keys.strafe = 0;
   }
   if (finger && keys.throttle === 0) keys.throttle = finger.throttle;
+  const vrStick = presenting && ride.eject ? readLeftStick(renderer.xr.getSession?.()) : null;
   const selected = selectRideInput({
     presenting,
+    ejected: !!ride.eject,
     hands: presenting ? readHands(controllers, camera) : null,
+    vrStick,
     tilt: finger ? null : latestTilt,
     keys,
     preferTilt: !finger && isCoarse() && !!latestTilt,
   });
   selected.jump = onFootJump(navigation.keysDown);
-  selected.strafe = ride.eject ? (keys.strafe || 0) : 0;
+  if (presenting && ride.eject && vrJumpDown(renderer.xr.getSession?.()?.inputSources)) {
+    selected.jump = true;
+  }
+  selected.strafe = footStrafe(selected.source, !!ride.eject, keys.strafe, selected.strafe);
+  if (presenting && ride.eject && posed) {
+    camera.getWorldDirection(headDir);
+    const face = faceFromHead(headDir.x, headDir.z, posed.forward, posed.right);
+    if (face != null) ride.eject.face = face;
+    selected.steer = 0;
+  }
   return selected;
 }
 
@@ -1632,6 +1729,17 @@ function noteExtremeHit() {
 
 function tickBody(dt) {
   syncEnterVrButton();
+  const presentingEarly = !!renderer.xr?.isPresenting;
+  if (presentingEarly && !vrChromeOn) {
+    captureVrDesktop();
+    vrHelpWanted = false;
+    vrChromeOn = true;
+  } else if (!presentingEarly && vrChromeOn) {
+    restoreVrDesktop();
+    vrChromeOn = false;
+    vrHelpWanted = false;
+  }
+  if (presentingEarly) holdVrPanels();
   const step = Math.min(Math.max(dt || 0, 0), 0.05);
   elapsed += step;
   noteHostSilence();
@@ -1749,6 +1857,7 @@ function tickBody(dt) {
   placeHelp();
   graphicsPanel?.afterHud();
   placeSettings();
+  if (presenting) holdVrPanels();
   paintCountdown();
   pending = sampleInput(presenting);
   sendParty(step);

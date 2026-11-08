@@ -38,3 +38,12 @@ export function vrViewAnchor(origin, right, forward, cam, pitch, seatEye) {
     z: origin.z + right.z * lx - hfz * lz,
   };
 }
+
+// On foot the rider stands in the body. A local-floor pose already includes
+// eye height, so the rig sits on the ground and the pose is not subtracted.
+// A local pose (seat near 0) needs the standing eye added here.
+export function vrFootAnchor(origin, right, forward, seatEye) {
+  const eye = Number(seatEye) || 0;
+  const y = Math.abs(eye) > 0.2 ? origin.y : origin.y + VIEWS[2].pivot;
+  return vrViewAnchor({ x: origin.x, y, z: origin.z }, right, forward, [0, 0, 0], 0, 0);
+}

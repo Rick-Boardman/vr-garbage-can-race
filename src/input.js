@@ -65,6 +65,69 @@ export function inputFromHands({ leftY, rightY, headY }) {
   return { steer, throttle };
 }
 
+// On foot in the headset. WebXR stick forward is negative Y.
+// Check: x 0, y -1 → throttle 1, strafe 0. x 1, y 0 → throttle 0, strafe 1.
+export function inputFromVrStick(x, y) {
+  const sx = Number.isFinite(x) ? x : 0;
+  const sy = Number.isFinite(y) ? y : 0;
+  const ax = Math.abs(sx) < 0.18 ? 0 : sx;
+  const ay = Math.abs(sy) < 0.18 ? 0 : sy;
+  return {
+    steer: 0,
+    throttle: ay === 0 ? 0 : clamp(-ay, -1, 1),
+    strafe: ax === 0 ? 0 : clamp(ax, -1, 1),
+    source: "vr-walk",
+  };
+}
+
+// Quest may put the thumbstick on axes 0,1 or 2,3. The first decisive
+// push locks the pair. Until then, a quiet pad stays on 0,1.
+export function vrStickPair(axes, locked = null) {
+  if (!axes || axes.length < 2) return null;
+  if (locked === 0 || locked === 2) return { index: locked, lock: false };
+  const choices = axes.length >= 4 ? [0, 2] : [0];
+  let best = 0;
+  let bestMag = -1;
+  for (const index of choices) {
+    const mag = Math.hypot(Number(axes[index]) || 0, Number(axes[index + 1]) || 0);
+    if (mag > bestMag) {
+      bestMag = mag;
+      best = index;
+    }
+  }
+  if (axes.length < 4) return { index: 0, lock: false };
+  if (bestMag >= 0.35) return { index: best, lock: true };
+  if (bestMag >= 0.15) return { index: best, lock: false };
+  return { index: 0, lock: false };
+}
+
+// A or X. The trigger is the HUD pointer, so button 0 does not jump.
+export function vrJumpDown(sources) {
+  if (!sources) return false;
+  for (const source of sources) {
+    const button = source?.gamepad?.buttons?.[4];
+    if (button?.pressed) return true;
+  }
+  return false;
+}
+
+// Head direction on the ground, as the face walkerForward already uses.
+// Check: head (0,-1), forward (0,-1), right (1,0) → 0. Head (1,0) → π/2.
+// A climb shortens forward.xz, so the face is atan2(across * span, along).
+// That is the value walkerForward turns back into this same look.
+// A look shorter than 0.2 (straight down) returns null so the old face stays.
+export function faceFromHead(headX, headZ, forward, right) {
+  const len = Math.hypot(headX, headZ);
+  if (!(len >= 0.2)) return null;
+  const nx = headX / len;
+  const nz = headZ / len;
+  const span = Math.hypot(forward?.x, forward?.z) || 1;
+  const rspan = Math.hypot(right?.x, right?.z) || 1;
+  const along = nx * (forward.x / span) + nz * (forward.z / span);
+  const across = nx * (right.x / rspan) + nz * (right.z / rspan);
+  return Math.atan2(across * span, along);
+}
+
 export function tiltAxes({ beta, gamma, screenAngle = 0 }) {
   const angle = ((Number(screenAngle) % 360) + 360) % 360;
   let steerDeg = gamma;
@@ -101,7 +164,15 @@ export function footDragStick({ ejected, dragging, touch, pitch }) {
   };
 }
 
-export function selectRideInput({ presenting, hands, tilt, keys, preferTilt = false }) {
+// A stick strafe has to survive the keyboard strafe write. Keys only apply
+// when the rider is on foot and not walking with the headset stick.
+export function footStrafe(source, ejected, keyStrafe, stickStrafe) {
+  if (source === "vr-walk") return stickStrafe || 0;
+  return ejected ? (keyStrafe || 0) : 0;
+}
+
+export function selectRideInput({ presenting, ejected = false, hands, tilt, keys, preferTilt = false, vrStick = null }) {
+  if (presenting && ejected && vrStick) return { ...vrStick, source: "vr-walk", steer: 0 };
   if (presenting && hands) return { ...hands, source: "vr" };
   const keyActive = !!keys && (keys.steer !== 0 || keys.throttle !== 0 || (keys.strafe || 0) !== 0);
   // A phone wants tilt even while a key is down. On a desktop, held keys win
