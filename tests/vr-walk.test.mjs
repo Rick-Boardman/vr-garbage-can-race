@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as THREE from "three";
 
 import { createCourse, sampleCourse, wrapAngle } from "../src/course.js";
 import { createRideState, stepRide, walkerForward } from "../src/drive.js";
@@ -12,7 +13,7 @@ import {
   vrJumpDown,
   vrStickPair,
 } from "../src/input.js";
-import { VIEWS, vrFootAnchor } from "../src/views.js";
+import { VIEWS, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
   const forward = { x: 0, y: 0, z: -1 };
@@ -180,4 +181,68 @@ test("stick forward at face π/2 walks toward the right, and the standing eye is
   assert.equal(floor.z, origin.z);
   const local = vrFootAnchor(origin, right, forward, 0);
   assert.equal(local.y, origin.y + VIEWS[2].pivot);
+});
+
+test("a headset turned around in the room still looks down the road", () => {
+  const level = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2, 0, "YXZ"));
+  assert.ok(Math.abs(referenceYaw(level.x, level.y, level.z, level.w) - Math.PI / 2) < 1e-6);
+  assert.equal(referenceYaw(0, 0, 0, 1), 0);
+
+  const heading = 0.4;
+  const viewPitch = -0.32;
+  const posePos = { x: 0.35, y: 1.45, z: -0.2 };
+  const anchor = { x: 8, y: 3, z: -6 };
+  const player = new THREE.Group();
+  const yawNode = new THREE.Group();
+  const pitchNode = new THREE.Group();
+  const rollNode = new THREE.Group();
+  const head = new THREE.Group();
+  const cam = new THREE.PerspectiveCamera();
+  player.add(yawNode);
+  yawNode.add(pitchNode);
+  pitchNode.add(rollNode);
+  rollNode.add(head);
+  head.add(cam);
+
+  const expected = new THREE.Vector3(0, 0, -1);
+  let eye = null;
+  for (const turned of [0, Math.PI, -1.4, 2.2]) {
+    for (const posePitch of [0, 0.35]) {
+      const pose = new THREE.Quaternion().setFromEuler(new THREE.Euler(posePitch, turned, 0.15, "YXZ"));
+      const py = referenceYaw(pose.x, pose.y, pose.z, pose.w);
+      const placed = vrPresentRig(anchor, heading, py, viewPitch, posePos);
+      if (turned === 0 && posePitch === 0) {
+        assert.ok(Math.abs(placed.x - anchor.x) < 1e-6);
+        assert.ok(Math.abs(placed.y - anchor.y) < 1e-6);
+        assert.ok(Math.abs(placed.z - anchor.z) < 1e-6);
+      }
+      yawNode.rotation.set(0, placed.rigYaw, 0);
+      pitchNode.rotation.set(0, 0, 0);
+      rollNode.rotation.set(0, 0, 0);
+      head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
+      cam.position.set(posePos.x, posePos.y, posePos.z);
+      cam.quaternion.copy(pose);
+      player.position.set(placed.x, placed.y, placed.z);
+      player.updateMatrixWorld(true);
+
+      const look = new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), viewPitch))
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), posePitch))
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.15));
+      expected.set(0, 0, -1).applyQuaternion(look);
+      const dir = new THREE.Vector3();
+      cam.getWorldDirection(dir);
+      const align = dir.dot(expected);
+      assert.ok(align > 0.999, `turned ${turned} pitch ${posePitch} aligns ${align}`);
+
+      const pos = new THREE.Vector3();
+      cam.getWorldPosition(pos);
+      if (posePitch === 0) {
+        if (!eye) eye = pos.clone();
+        else assert.ok(pos.distanceTo(eye) < 1e-4, `eye moved ${pos.distanceTo(eye)} at yaw ${turned}`);
+      }
+    }
+  }
+  assert.ok(eye.y < anchor.y + posePos.y, "the downward pitch does not lift the eye into the hill");
 });

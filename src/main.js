@@ -43,7 +43,7 @@ import { createProps } from "./props.js";
 import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
-import { VIEWS, viewIndexFor, vrFootAnchor, vrViewAnchor } from "./views.js";
+import { VIEWS, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
 import { layoutVrChrome } from "./vr-chrome.js";
 import {
   footDragStick,
@@ -337,6 +337,7 @@ let rideProps = null;
 let wornKey = "";
 let daylight = null;
 let player = null;
+let playerYaw = null;
 let navigation = null;
 let renderer = null;
 let enterVrSupported = false;
@@ -440,6 +441,7 @@ api.audio = () => sound.status();
 const { scene, camera } = boot;
 hudSystem = boot.hudSystem;
 player = boot.rig.player;
+playerYaw = boot.rig.playerYaw;
 head = boot.rig.head;
 const enterVrButton = document.getElementById("enter-vr");
 if (enterVrButton) {
@@ -476,8 +478,9 @@ hudSystem.setHelpOverrideLines([
   "Enter VR is the button at the top right.",
   "Lower the left controller to steer left, the right to steer right.",
   "Lower both controllers to speed up. Raise them to lean back and brake.",
+  "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
-  "The right stick turns the view. X or A jumps.",
+  "The right stick turns the view and the way you walk. X or A jumps.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -743,9 +746,8 @@ function placeWorld(presenting) {
     : null;
   const courseHeading = headingYaw(posed.forward.x, posed.forward.z);
   // On foot, eject.face is the view and the walk. The right stick owns it.
-  // The headset pose is parented to this rig, so the rig yaws to that face
-  // and the pose only adds the head. Copying the headset yaw into the face
-  // would turn the picture twice. In the can, the rig stays on the course.
+  // In the can, heading stays on the course. The headset yaw is cancelled
+  // below so a rider turned around in the room still looks along heading.
   const heading = facing
     ? headingYaw(facing.x, facing.z)
     : courseHeading;
@@ -843,8 +845,22 @@ function placeWorld(presenting) {
         view.pitch,
         vrSeatEye ?? 0,
       );
-    player.position.set(eye.x, eye.y, eye.z);
-    if (head) head.rotation.set(pitch, 0, 0);
+    // look yaw stays the road (or the walk face). The node yaw cancels the
+    // headset so the picture matches that heading. Set this after setYaw,
+    // which writes the logical heading onto the node.
+    const xrCam = renderer?.xr?.getCamera?.();
+    const poseQ = xrCam?.quaternion;
+    const poseP = xrCam?.position;
+    const placed = vrPresentRig(
+      eye,
+      heading,
+      poseQ ? referenceYaw(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0,
+      pitch,
+      poseP,
+    );
+    if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
+    player.position.set(placed.x, placed.y, placed.z);
+    if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
   } else {
