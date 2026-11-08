@@ -42,6 +42,13 @@ export function createRider(THREE, materials, props, look = null) {
   const seatedPersonY = () => 0.06 - 0.1 * personScale + ageLift * canScale;
   person.scale.setScalar(personScale);
   person.position.y = seatedPersonY();
+  // The standing hem is wider than the shell. Tuck is can-local clearance
+  // over that hem, so a seated skirt does not draw through the walls.
+  person.userData.skirtTuck = skirtTuckFor(person, shellId(look), canScale, seatedPersonY());
+  const seatedSkirt = person.getObjectByName("person-skirt");
+  if (seatedSkirt && person.userData.skirtTuck < 1) {
+    seatedSkirt.scale.set(person.userData.skirtTuck, 1, person.userData.skirtTuck);
+  }
   addShirtMark(person, THREE, look, canScale, personScale, seatedPersonY());
   const shadow = new THREE.Mesh(
     new THREE.CircleGeometry(0.55, 14),
@@ -171,6 +178,7 @@ function personStyle(look) {
   const styled = look && (
     look.body || look.top || look.bottom || look.hair || look.age
     || look.skin != null || look.hairColor != null || look.complexion
+    || look.hat === "pirate"
   );
   if (!styled) return null;
   const skin = listedHex(SKIN_COLORS, "skin", look.skin);
@@ -182,6 +190,7 @@ function personStyle(look) {
     top: look.top === "blouse" ? "blouse" : "tee",
     bottom: look.bottom === "skirt" ? "skirt" : "pants",
     hair: look.hair === "long" || look.hair === "bun" || look.hair === "bald" ? look.hair : "short",
+    hat: look.hat === "pirate" ? "pirate" : "none",
     ...(skin != null ? { skin } : {}),
     ...(hairColor != null ? { hairColor } : {}),
     complexion,
@@ -194,12 +203,50 @@ function canScaleOf(look) {
   return 1;
 }
 
+// Inside the wall at the hem, with a gap so the cloth does not sit in the
+// shell. Round and drum are wider. Oval, taper, and flare pinch in.
+const SKIRT_CLEARANCE = {
+  round: 0.4,
+  square: 0.36,
+  drum: 0.42,
+  taper: 0.3,
+  oval: 0.26,
+  flare: 0.29,
+};
+
+function skirtHemRadius(skirt) {
+  const pos = skirt.geometry.attributes.position;
+  let hem = 0;
+  for (let i = 0; i < pos.count; i += 1) {
+    if (pos.getY(i) > 0.02) continue;
+    hem = Math.max(hem, Math.hypot(pos.getX(i), pos.getZ(i)));
+  }
+  return hem;
+}
+
+function skirtTuckFor(person, shape, canScale, seatedY) {
+  const skirt = person.getObjectByName("person-skirt");
+  if (!skirt) return 1;
+  const hem = skirtHemRadius(skirt);
+  const personScale = person.scale.x || 1;
+  if (hem <= 0 || personScale <= 0) return 1;
+  const canY = (seatedY + skirt.position.y * personScale) / canScale;
+  const clearance = shape === "barrel"
+    ? Math.max(0.24, barrelRadiusAt(canY) - 0.05)
+    : (SKIRT_CLEARANCE[shape] || 0.36);
+  const limit = clearance * canScale;
+  const worldHem = hem * personScale;
+  if (worldHem <= limit) return 1;
+  return limit / worldHem;
+}
+
 const shellGeometry = new Map();
 const logoTextures = new Map();
 const shirtLogoTextures = new Map();
 
 function shellId(look) {
   const shape = look?.canShape;
+  if (shape === "barrel") return "barrel";
   return CAN_SHELLS[shape] ? shape : "round";
 }
 
@@ -274,9 +321,129 @@ function addFloor(can, THREE, materials, look, shape) {
 
 function addCan(can, THREE, materials, look) {
   const shape = shellId(look);
+  if (shape === "barrel") {
+    addBarrel(can, THREE, materials);
+    return;
+  }
   can.add(shellMesh(THREE, materials, look, shape));
   addFloor(can, THREE, materials, look, shape);
   addColorBand(can, THREE, materials, look, shape);
+}
+
+// Open oak cask. The belly is the widest ring. Ends pinch in, same idea as
+// a stave barrel. Radius stays inside the shared can hit radius (0.5).
+const BARREL_HEIGHT = 0.98;
+const BARREL_OAK = 0xb5814a;
+
+export function barrelRadiusAt(y) {
+  const t = Math.min(1, Math.max(0, y / BARREL_HEIGHT));
+  return 0.34 + 0.14 * Math.sin(Math.PI * t);
+}
+
+let barrelParts = null;
+let barrelWoodShared = null;
+
+function barrelKit(THREE) {
+  if (barrelParts) return barrelParts;
+  const points = [];
+  const steps = 12;
+  for (let i = 0; i <= steps; i += 1) {
+    const y = (i / steps) * BARREL_HEIGHT;
+    points.push(new THREE.Vector2(barrelRadiusAt(y), y));
+  }
+  const body = new THREE.LatheGeometry(points, 24);
+  const hoop = new THREE.CylinderGeometry(1, 1, 1, 18, 1, true);
+  const rim = new THREE.TorusGeometry(1, 0.055, 6, 18);
+  const floor = new THREE.CylinderGeometry(1, 1, 0.06, 16);
+  const seam = new THREE.BoxGeometry(1, 1, 1);
+  for (const geometry of [body, hoop, rim, floor, seam]) geometry.userData.shared = true;
+  barrelParts = { body, hoop, rim, floor, seam };
+  return barrelParts;
+}
+
+function paintBarrelWood(ctx, width, height) {
+  const staves = 12;
+  for (let i = 0; i < staves; i += 1) {
+    ctx.fillStyle = i % 2 === 0 ? "#c4925a" : "#a56b3c";
+    ctx.fillRect((i * width) / staves, 0, width / staves + 1, height);
+    ctx.fillStyle = "#5c3a22";
+    ctx.fillRect((i * width) / staves, 0, 3, height);
+  }
+  ctx.strokeStyle = "rgba(92, 58, 34, 0.45)";
+  ctx.lineWidth = 1;
+  for (let y = 6; y < height; y += 6) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    const wobble = y % 12 === 0 ? 2 : -1;
+    ctx.bezierCurveTo(width * 0.35, y + wobble, width * 0.7, y - wobble, width, y);
+    ctx.stroke();
+  }
+}
+
+function barrelWoodMaterial(THREE, materials) {
+  if (typeof document === "undefined") {
+    return materials.standard(BARREL_OAK, { flat: false, roughness: 0.9, metalness: 0.02 });
+  }
+  if (barrelWoodShared) return barrelWoodShared;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  paintBarrelWood(canvas.getContext("2d"), 256, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.anisotropy = 4;
+  barrelWoodShared = new THREE.MeshStandardMaterial({
+    map: texture,
+    color: 0xffffff,
+    roughness: 0.88,
+    metalness: 0.02,
+  });
+  return barrelWoodShared;
+}
+
+// Staves stay oak. Can color and the metal/rubber finish do not paint them.
+// The clone is DoubleSide so the open top still shows wood from inside.
+function addBarrel(can, THREE, materials) {
+  const parts = barrelKit(THREE);
+  const wood = own(barrelWoodMaterial(THREE, materials).clone());
+  wood.side = THREE.DoubleSide;
+  const seamMat = materials.standard(0x6a4328, { flat: false, roughness: 0.94, metalness: 0 });
+  const iron = materials.standard(0x3a342c, { flat: false, roughness: 0.4, metalness: 0.78 });
+  const shell = new THREE.Mesh(parts.body, wood);
+  shell.name = "can-barrel";
+  const floor = new THREE.Mesh(parts.floor, wood);
+  floor.name = "can-floor";
+  floor.scale.set(0.3, 1, 0.3);
+  floor.position.y = 0.04;
+  can.add(shell, floor);
+  for (const y of [0.18, 0.5, 0.8]) {
+    const hoop = new THREE.Mesh(parts.hoop, iron);
+    hoop.name = "can-hoop";
+    const radius = barrelRadiusAt(y) + 0.014;
+    hoop.scale.set(radius, 0.042, radius);
+    hoop.position.y = y;
+    can.add(hoop);
+  }
+  const lipR = barrelRadiusAt(BARREL_HEIGHT);
+  const lip = new THREE.Mesh(parts.rim, iron);
+  lip.name = "can-rim";
+  lip.scale.setScalar(lipR);
+  // TorusGeometry lies in XY. A quarter turn lays the lip on the rim.
+  lip.rotation.x = Math.PI / 2;
+  lip.position.y = 0.97;
+  can.add(lip);
+  const belly = barrelRadiusAt(0.5) + 0.01;
+  for (let i = 0; i < 12; i += 1) {
+    const angle = (i / 12) * Math.PI * 2;
+    const seam = new THREE.Mesh(parts.seam, seamMat);
+    seam.name = "can-stave";
+    seam.scale.set(0.016, 0.34, 0.02);
+    seam.position.set(Math.cos(angle) * belly, 0.5, Math.sin(angle) * belly);
+    // local +z points out. angle 0 sits on +x, so rotation.y is π/2.
+    seam.rotation.y = Math.PI / 2 - angle;
+    can.add(seam);
+  }
 }
 
 const MARKS = {
@@ -286,6 +453,7 @@ const MARKS = {
   taper: [0.56, 0.36],
   oval: [0.7, 0.34],
   flare: [0.58, 0.36],
+  barrel: [0.5, 0.32],
 };
 
 function logoTexture(THREE, id) {
@@ -365,7 +533,14 @@ function shirtLogoTexture(THREE, id) {
 // floated the star off the belly. Check: drum center z stays under markZ + 0.03.
 const MARK_PROUD = 0.012;
 
+function barrelSurfaceZ(x, y, side) {
+  const radius = barrelRadiusAt(y);
+  const z = Math.sqrt(Math.max(0, radius * radius - x * x));
+  return side * (z + MARK_PROUD);
+}
+
 function surfaceZ(shape, x, y, side) {
+  if (shape === "barrel") return barrelSurfaceZ(x, y, side);
   const data = CAN_SHELLS[shape];
   const positions = data.positions;
   let best = Infinity;

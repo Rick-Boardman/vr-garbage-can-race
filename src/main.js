@@ -4,6 +4,8 @@ import { createHudChatPanel } from "../node_modules/@rb/halo/src/ui/chat-panel.j
 
 import { createSound } from "./audio.js";
 import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js";
+import { createHotbarIcons } from "./hotbar-icons.js";
+import { RELEASE } from "./release.js";
 import { FOOT_RADIUS, START_S } from "./constants.js";
 import { createLobby } from "./lobby.js";
 import {
@@ -44,6 +46,14 @@ import {
 } from "./input.js";
 
 const BEST_KEY = "garbage-can-race-best";
+const HOTBAR = {
+  camera: 0,
+  course: 1,
+  settings: 2,
+  style: 3,
+  help: 4,
+  lobby: 5,
+};
 const VIEWS = [
   { id: "first", name: "first person", pivot: 1.62, cam: [0, 0, 0.12], pitch: -0.22, showPerson: false },
   { id: "close", name: "just behind", pivot: 0.72, cam: [0, 1.45, 3.35], pitch: -0.32, showPerson: true },
@@ -313,12 +323,15 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
-    hotbarSlotCount: 3,
+    hotbarSlotCount: 6,
     reserveSystemHotbarSlots: false,
     onHotbarSlot({ index }) {
-      if (index === 0) cycleView();
-      else if (index === 1) pressNew();
-      else if (index === 2) hudSystem?.toggleSettings();
+      if (index === HOTBAR.camera) cycleView();
+      else if (index === HOTBAR.course) pressNew();
+      else if (index === HOTBAR.settings) toggleGraphics();
+      else if (index === HOTBAR.style) lobby.toggleStyle();
+      else if (index === HOTBAR.help) hudSystem?.toggleHelp();
+      else if (index === HOTBAR.lobby) backToLobby();
     },
     onEnterVR() {
       const sample = sampleCourse(course, ride.s);
@@ -362,23 +375,41 @@ hudSystem = boot.hudSystem;
 player = boot.rig.player;
 
 hudSystem.setHelpOverrideLines([
-  "A / D steer. W or Shift tucks. X toggles autowalk. S brakes. Space hops out.",
-  "On foot, A/D strafe. Q/E turn. W walks the way you face. X keeps walking. Space jumps.",
-  "Drag looks around while riding. On foot, drag a finger to walk and turn.",
-  "V or 1 2 3 changes the camera. N starts a new hill. Host or Join waits at the start line.",
-  "VR: lower the left controller to steer left, the right to steer right.",
+  "In the can",
+  "A and D steer. W or Shift goes faster. S brakes.",
+  "X toggles auto walk. Space hops out of the can.",
+  "Drag looks around. N starts a new hill.",
+  "",
+  "On foot",
+  "A and D strafe. Q and E turn. W walks the way you face.",
+  "X keeps walking. Space jumps. Drag walks and turns.",
+  "Walk back to the can to get in.",
+  "",
+  "Camera",
+  "V or 1 2 3 changes the camera.",
+  "1 looks out from inside the can.",
+  "2 looks from behind the can. 3 looks from farther back.",
+  "",
+  "Headset",
+  "Lower the left controller to steer left, the right to steer right.",
   "Lower both controllers to speed up. Raise them to lean back and brake.",
-  "Phone: tilt the phone. Allow motion when the browser asks.",
+  "",
+  "Phone",
+  "Tilt the phone. Allow motion when the browser asks.",
 ]);
 hudSystem.setWindowHidden("status", true);
 hudSystem.setWindowHidden("debug", true);
-hudSystem.setWindowHidden("help", true);
+const hotbarIcons = createHotbarIcons(THREE);
 hudSystem.setHotbarItems([
-  { shortLabel: "CAM", iconText: "CAM", tooltip: "Cycle camera (V)" },
-  { shortLabel: "NEW", iconText: "NEW", tooltip: "New hill (N)" },
-  { shortLabel: "GFX", iconText: "GFX", tooltip: "Graphics and sound" },
+  { shortLabel: "CAM", tooltip: "Cycle camera (V)", iconTexture: hotbarIcons.camera, showNumber: false },
+  { shortLabel: "NEW", tooltip: "New hill (N)", iconTexture: hotbarIcons.course, showNumber: false },
+  { shortLabel: "GFX", tooltip: "Graphics and sound", iconTexture: hotbarIcons.gear, showNumber: false },
+  { shortLabel: "STYLE", tooltip: "Character styling", iconTexture: hotbarIcons.style, showNumber: false },
+  { shortLabel: "HELP", tooltip: "How to play", iconTexture: hotbarIcons.help, showNumber: false },
+  { shortLabel: "LOBBY", tooltip: "Lobby", iconTexture: hotbarIcons.lobby, showNumber: false },
 ]);
-hudSystem.toggleSettings();
+// Settings boots off the screen. Opening it here is what put GRAPHICS up
+// before the rider asked for it.
 if (typeof hudSystem.setWindowLines === "function") {
   hudSystem.setWindowLines("settings", []);
   const setWindowLines = hudSystem.setWindowLines.bind(hudSystem);
@@ -388,21 +419,121 @@ if (typeof hudSystem.setWindowLines === "function") {
   };
 }
 const graphicsPanel = quality
-  ? createGraphicsPanel({ THREE, hudSystem, calibration: quality, renderer })
+  ? createGraphicsPanel({
+      THREE,
+      hudSystem,
+      calibration: quality,
+      renderer,
+      notes: settingsNotes,
+    })
   : null;
 graphicsTyping = () => !!graphicsPanel?.isTyping();
+{
+  const win = settingsWindow();
+  if (win) {
+    if (!(win.minW >= 440)) win.minW = 440;
+    if (!(win.minH >= 520)) win.minH = 520;
+  }
+}
 let settingsMoved = false;
+let settingsWanted = false;
+function settingsWindow() {
+  return hudSystem.hud?.ui?.windows?.settings ?? null;
+}
+function graphicsOpen() {
+  const win = settingsWindow();
+  return !!win && win.y > -1000;
+}
+function toggleGraphics() {
+  settingsWanted = !graphicsOpen();
+  hudSystem?.toggleSettings();
+}
 function placeSettings() {
-  const settingsWindow = hudSystem.hud?.ui?.windows?.settings;
+  const win = settingsWindow();
   const layoutW = Number(hudSystem.hud?.layoutW) || 0;
-  settingsMoved = nextSettingsPlacement(settingsWindow, layoutW, settingsMoved);
+  // A saved layout can put GRAPHICS back on screen. Keep that spot for the
+  // next open, then leave the panel hidden until GFX is pressed.
+  if (!settingsWanted && win && win.y > -1000) {
+    settingsMoved = true;
+    hudSystem.toggleSettings();
+  }
+  if (settingsWanted) {
+    settingsMoved = nextSettingsPlacement(win, layoutW, settingsMoved);
+  }
+  const items = hudSystem.hud?.ui?.data?.hotbarItems;
+  if (!Array.isArray(items)) return;
+  if (items[HOTBAR.settings]) items[HOTBAR.settings].active = graphicsOpen();
+  if (items[HOTBAR.style]) items[HOTBAR.style].active = lobby.styleOpen();
+  if (items[HOTBAR.help]) items[HOTBAR.help].active = helpOpen();
+}
+let helpPlaced = false;
+function helpWindow() {
+  return hudSystem.hud?.ui?.windows?.help ?? null;
+}
+function helpOpen() {
+  const win = helpWindow();
+  return !!win && win.y > -1000;
+}
+function placeHelp() {
+  if (helpPlaced) return;
+  const hud = hudSystem.hud;
+  if (!hud?.ui?._layoutInitialized) return;
+  const win = helpWindow();
+  if (!win) return;
+  helpPlaced = true;
+  if (win.y > -1000) return;
+  hudSystem.toggleHelp();
+  const layoutH = Number(hud.layoutH) || 0;
+  win.x = 16;
+  win.y = 302;
+  if (layoutH > win.h + 32) {
+    win.y = Math.min(win.y, Math.max(16, layoutH - win.h - 16));
+  }
+  win._helpHiddenX = win.x;
+  win._helpHiddenY = win.y;
+}
+function liftHotbarTooltip() {
+  const hud = hudSystem.hud;
+  if (!hud || renderer?.xr?.isPresenting) return;
+  const tip = hud.overlay?.tooltip;
+  if (!tip?.visible || !String(tip._hoverId || "").startsWith("hotbar:")) return;
+  const layoutH = Number(hud.layoutH);
+  if (!(layoutH > 1)) return;
+  const bar = hud.ui?.windows?.hotbar;
+  if (!bar || bar.y < -1000) return;
+  const bg = hud.objects?.overlay?.tooltipBg;
+  const text = hud.objects?.overlay?.tooltipText?.mesh;
+  if (!bg?.visible || !Number.isFinite(bg.position?.y) || !Number.isFinite(bg.scale?.y)) return;
+  const height = Math.abs(bg.scale.y) * layoutH;
+  if (!(height > 1)) return;
+  const centerY = (0.5 - bg.position.y) * layoutH;
+  const currentTop = centerY - height / 2;
+  const top = Math.max(8, bar.y - height - 8);
+  const delta = currentTop - top;
+  if (delta <= 1) return;
+  const local = delta / layoutH;
+  bg.position.y += local;
+  if (text?.position) text.position.y += local;
+}
+function inputLabel() {
+  if (pending.source === "vr") return "Controls: headset";
+  if (pending.source === "tilt") return "Controls: phone tilt";
+  return "Controls: keyboard";
+}
+function settingsNotes() {
+  const lines = [];
+  if (course?.seed != null) lines.push(`This hill was grown from ${course.seed}`);
+  lines.push(inputLabel());
+  if (partyClient?.code) lines.push(`Room ${partyClient.code}`);
+  lines.push(`Release ${RELEASE.commit}`, RELEASE.date);
+  return lines;
 }
 hudSystem.createWindow("race", {
-  title: "HILL",
+  title: "STATUS",
   x: 16,
   y: 16,
   w: 420,
-  h: 430,
+  h: 270,
   closeable: false,
   minimizable: true,
   scrollable: false,
@@ -413,10 +544,9 @@ function applyHudSkin(keys) {
   if (!hudSkin) hudSkin = hudSystem.loadWindowSkinTextures("assets/hud/");
   hudSystem.applyWindowSkinToWindows(keys, hudSkin, { cornerSize: 40 });
 }
-applyHudSkin(["race", "settings"]);
+applyHudSkin(["race", "settings", "help"]);
 
 function updateHud() {
-  const view = VIEWS[viewIndex];
   const district = districtAt(course, ride.s);
   const traveled = Math.max(0, ride.s - START_S);
   const best = Math.max(0, ride.best - START_S);
@@ -426,24 +556,14 @@ function updateHud() {
     frameTime = 0;
   }
   const lines = [
+    `${district.name} · ${district.time}`,
     `${Math.round(ride.speed * 3.6)} km/h`,
   ];
   if (frameRate > 0) lines.push(`${Math.round(frameRate)} fps`);
   lines.push(
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
-    `${district.name} · ${district.time}`,
     `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}`,
-    view.name,
-    seedLine(),
   );
-  if (ride.eject) {
-    lines.unshift("A/D strafe. Q/E turn. Drag walks. Space jumps.");
-    lines.unshift("Get back in the can");
-  } else {
-    lines.unshift("Drag looks. V or 1 2 3 camera. N new hill.");
-    lines.unshift("X for auto walk. Space hops out of the can.");
-    lines.unshift("A/D strafe. W or Shift faster. S brakes.");
-  }
   hudSystem.setWindowLines("race", lines);
 }
 
@@ -697,13 +817,6 @@ function chatFocused() {
 function typingInDom() {
   const tag = document.activeElement?.tagName;
   return tag === "INPUT" || tag === "TEXTAREA";
-}
-
-function seedLine() {
-  if (gate === "countdown" && partyClient.code) return `seed ${course.seed} · ${partyClient.code} · starting`;
-  if (gate === "waiting" && partyClient.code) return `seed ${course.seed} · ${partyClient.code} · waiting`;
-  if (partyClient.code) return `seed ${course.seed} · ${partyClient.code} · ${pending.source}`;
-  return `seed ${course.seed} · ${pending.source}`;
 }
 
 function rememberSlots(rows) {
@@ -1423,6 +1536,9 @@ function tickBody(dt) {
   }
   graphicsPanel?.prepare();
   renderHudFrame({ renderer, scene, camera, dt: step, hudSystem, navigation });
+  hudSystem.syncHotbarWindowSize?.();
+  liftHotbarTooltip();
+  placeHelp();
   graphicsPanel?.afterHud();
   placeSettings();
   paintCountdown();

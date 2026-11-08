@@ -106,9 +106,16 @@ export function onFootPose({ tumbling = false, moving = false } = {}) {
 }
 
 export function animatePerson(group, time) {
+  const pose = group.userData.pose || "walk";
+  // The flared hem is for standing and walking. In the can it is scaled in
+  // so the cloth stays inside the shell. Standing restores the full hem.
+  const skirt = group.getObjectByName("person-skirt");
+  if (skirt) {
+    const tuck = pose === "ride" && group.userData.skirtTuck > 0 ? group.userData.skirtTuck : 1;
+    skirt.scale.set(tuck, 1, tuck);
+  }
   const limbs = group.userData.limbs;
   if (!limbs) return;
-  const pose = group.userData.pose || "walk";
   const nod = group.userData.headPitch || 0;
   const phase = group.userData.phase || 0;
   const flop = group.userData.flop;
@@ -237,7 +244,11 @@ export function createProps(THREE, materials) {
   const sphere = new THREE.SphereGeometry(1, 8, 6);
   const cone = new THREE.ConeGeometry(1, 1, 7);
   const shadowGeo = new THREE.CircleGeometry(1, 12);
-  for (const geometry of [box, foliage, headGeo, chunky, trunk, wheel, sphere, cone, shadowGeo]) {
+  const hatBrimGeo = new THREE.CylinderGeometry(0.16, 0.17, 0.018, 16);
+  const hatCrownGeo = new THREE.CylinderGeometry(0.1, 0.12, 0.14, 10);
+  const hatBandGeo = new THREE.CylinderGeometry(0.125, 0.125, 0.028, 10);
+  const hatSkullGeo = new THREE.SphereGeometry(0.028, 6, 5);
+  for (const geometry of [box, foliage, headGeo, chunky, trunk, wheel, sphere, cone, shadowGeo, hatBrimGeo, hatCrownGeo, hatBandGeo, hatSkullGeo]) {
     geometry.userData.shared = true;
   }
 
@@ -249,6 +260,71 @@ export function createProps(THREE, materials) {
     const mesh = new THREE.Mesh(box, material);
     mesh.scale.set(w, h, d);
     return mesh;
+  }
+
+  // Tricorn on the skull. Built in adult-man units, then scaled to this head.
+  // The face looks down local -z, so the skull and the cocked front sit on -z.
+  // Character's left is -x. The feather leans that way and sweeps toward +z.
+  function addPirateHat(headPivot, headScale) {
+    const hat = new THREE.Group();
+    hat.name = "person-pirate-hat";
+    hat.userData.keep = true;
+    const halfX = 1.046 * headScale[0];
+    const top = 0.9 * headScale[1];
+    hat.position.y = top - 0.012;
+    hat.scale.setScalar(halfX / 0.17);
+    const cloth = materials.lambert(0x1a120e, { flat: false });
+    const gold = materials.lambert(0xc9a227, { flat: false });
+    const bone = materials.lambert(0xf3efe6, { flat: true });
+    const featherMat = materials.lambert(0x8e1d2a, { flat: false });
+    const ink = materials.lambert(0x14110e, { flat: true });
+
+    const brim = new THREE.Mesh(hatBrimGeo, cloth);
+    brim.name = "person-pirate-brim";
+    brim.position.y = 0.012;
+    const crown = new THREE.Mesh(hatCrownGeo, cloth);
+    crown.name = "person-pirate-crown";
+    crown.position.y = 0.09;
+    const band = new THREE.Mesh(hatBandGeo, gold);
+    band.name = "person-pirate-band";
+    band.position.y = 0.05;
+
+    // The round brim only covers the skull. The three cocked flaps are the
+    // tricorn points and they stick out past the head.
+    // Positive rotation.x lifts the -z edge. Check: local z=-0.5 ends above the brim.
+    const front = scaledBox(0.22, 0.022, 0.3, cloth);
+    front.name = "person-pirate-front";
+    front.position.set(0, 0.1, -0.24);
+    front.rotation.x = 0.95;
+    // Negative rotation.z lifts the -x edge. Positive lifts the +x edge.
+    const left = scaledBox(0.28, 0.022, 0.16, cloth);
+    left.name = "person-pirate-left";
+    left.position.set(-0.22, 0.08, 0.02);
+    left.rotation.z = -0.95;
+    const right = scaledBox(0.28, 0.022, 0.16, cloth);
+    right.name = "person-pirate-right";
+    right.position.set(0.22, 0.08, 0.02);
+    right.rotation.z = 0.95;
+
+    const skull = new THREE.Group();
+    skull.name = "person-pirate-skull";
+    skull.position.set(0, 0.1, -0.14);
+    const cranium = new THREE.Mesh(hatSkullGeo, bone);
+    cranium.scale.set(1, 1.15, 0.55);
+    const eyeL = scaledBox(0.012, 0.014, 0.01, ink);
+    eyeL.position.set(-0.012, 0.004, -0.02);
+    const eyeR = scaledBox(0.012, 0.014, 0.01, ink);
+    eyeR.position.set(0.012, 0.004, -0.02);
+    skull.add(cranium, eyeL, eyeR);
+
+    const feather = scaledBox(0.02, 0.28, 0.05, featherMat);
+    feather.name = "person-pirate-feather";
+    feather.position.set(-0.16, 0.24, 0.04);
+    feather.rotation.x = 0.4;
+    feather.rotation.z = 0.5;
+
+    hat.add(brim, crown, band, front, left, right, skull, feather);
+    headPivot.add(hat);
   }
 
   // face -1 puts the lens on the nose (local -z). face +1 puts it on the tail.
@@ -585,6 +661,12 @@ export function createProps(THREE, materials) {
         brow.position.set(x, 0.055, -0.12);
         headPivot.add(eye, brow);
       }
+    }
+    if (style?.hat === "pirate") {
+      const bun = headPivot.getObjectByName("person-hair-bun");
+      // The bun would sit through the crown. Park it on the back of the skull.
+      if (bun) bun.position.set(0, headScale[1] * 0.35, headScale[2] * 1.05);
+      addPirateHat(headPivot, headScale);
     }
     bakeStatic(headPivot);
     if (style?.complexion === "freckled") {

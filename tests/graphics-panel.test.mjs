@@ -7,7 +7,9 @@ test("the graphics window stays where it was dragged", () => {
   const win = { x: 0, y: 0, w: 200, h: 200, dragging: false, resizing: false };
   assert.equal(nextSettingsPlacement(win, 1280, false), false);
   assert.equal(win.w, 440);
-  assert.equal(win.h, 390);
+  assert.equal(win.h, 520);
+  assert.equal(win.minW, 440);
+  assert.equal(win.minH, 520);
   assert.equal(win.x, 1280 - 440 - 16);
   assert.equal(win.y, 16);
   assert.equal(win._settingsHiddenX, win.x);

@@ -55,10 +55,9 @@
       #lobby-invite[hidden],
       #lobby-solo[hidden],
       #start-countdown[hidden],
+      #hill-bar[hidden],
       #hill-start[hidden],
       #hill-leave[hidden],
-      #hill-lobby[hidden],
-      #hill-style[hidden],
       #hill-wait[hidden],
       #play-style[hidden] {
         display: none !important;
@@ -173,9 +172,7 @@
       #play-style button,
       #lobby-invite button,
       #hill-start,
-      #hill-leave,
-      #hill-lobby,
-      #hill-style {
+      #hill-leave {
         margin: 4px 8px 4px 0;
         padding: 8px 12px;
         border: 0;
@@ -183,10 +180,6 @@
         background: #f2c879;
         color: #14110e;
         font: inherit;
-      }
-      #hill-style[aria-pressed="true"] {
-        background: #3d3226;
-        color: #f2c879;
       }
       #lobby button:disabled {
         opacity: 0.45;
@@ -408,9 +401,7 @@
         max-width: min(560px, calc(100% - 32px));
       }
       #hill-start,
-      #hill-leave,
-      #hill-lobby,
-      #hill-style {
+      #hill-leave {
         margin: 0;
       }
       #play-style {

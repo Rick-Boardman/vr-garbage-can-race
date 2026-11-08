@@ -16,6 +16,7 @@ import {
   COMPLEXIONS,
   HAIR_COLORS,
   HAIR_STYLES,
+  HATS,
   LOGO_COLORS,
   LOGOS,
   RIDER_LOOKS,
@@ -154,17 +155,20 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   previewWrap.append(previewClose, previewCanvas, previewHint);
   const preview = mountPreview(previewCanvas);
 
+  let pirateButton = null;
   const dresser = document.createElement("div");
   dresser.id = "lobby-dresser";
   dresser.append(
     previewWrap,
     groupLabel("Rider"),
+    pirateRow(),
     iconRow("Body", BODIES, "body", bodyIcon),
     iconRow("Age", AGES, "age", ageIcon),
     iconRow("Top", TOPS, "top", topIcon),
     pickRow("Shirt", RIDER_LOOKS, "shirtRand"),
     iconRow("Bottom", BOTTOMS, "bottom", bottomIcon),
     iconRow("Hair", HAIR_STYLES, "hair", hairIcon),
+    iconRow("Hat", HATS, "hat", hatIcon),
     pickRow("Hair color", HAIR_COLORS, "hairColor"),
     pickRow("Skin", SKIN_COLORS, "skin"),
     iconRow("Complexion", COMPLEXIONS, "complexion", complexionIcon),
@@ -255,19 +259,10 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   hillLeave.id = "hill-leave";
   hillLeave.textContent = "Leave";
   hillLeave.hidden = true;
-  const hillBack = document.createElement("button");
-  hillBack.type = "button";
-  hillBack.id = "hill-lobby";
-  hillBack.textContent = "Lobby";
-  hillBack.hidden = true;
-  const hillStyle = document.createElement("button");
-  hillStyle.type = "button";
-  hillStyle.id = "hill-style";
-  hillStyle.textContent = "Character styling";
-  hillStyle.hidden = true;
   const hillBar = document.createElement("div");
   hillBar.id = "hill-bar";
-  hillBar.append(hillStart, hillLeave, hillBack, hillStyle);
+  hillBar.hidden = true;
+  hillBar.append(hillStart, hillLeave);
   const hillWait = document.createElement("p");
   hillWait.id = "hill-wait";
   hillWait.hidden = true;
@@ -287,10 +282,6 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   playStyle.id = "play-style";
   playStyle.hidden = true;
   playStyle.append(playStyleHead, playStyleBody);
-  hillStyle.addEventListener("click", () => {
-    if (playStyle.hidden) openPlayStyle();
-    else closePlayStyle();
-  });
   playStyleClose.addEventListener("click", () => closePlayStyle());
 
   document.body.append(shell, banner, countdown, hillWait, hillBar, playStyle);
@@ -313,7 +304,6 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   soloButton.addEventListener("click", () => onAlone?.());
   hillStart.addEventListener("click", () => onSeal?.());
   hillLeave.addEventListener("click", () => onLeave?.());
-  hillBack.addEventListener("click", () => onBack?.());
   acceptButton.addEventListener("click", () => onAccept?.());
   declineButton.addEventListener("click", () => {
     pendingInvite = null;
@@ -524,8 +514,6 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   function openPlayStyle() {
     playStyleBody.append(dresser);
     playStyle.hidden = false;
-    hillStyle.setAttribute("aria-pressed", "true");
-    hillStyle.textContent = "Hide styling";
     setStyleOpen(true);
     // showLook fitted the camera before this panel had a width. A mismatched
     // buffer makes the running preview measure the hill panel on the next frame.
@@ -536,8 +524,6 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   function closePlayStyle() {
     const inPlay = playStyleBody.contains(dresser);
     playStyle.hidden = true;
-    hillStyle.setAttribute("aria-pressed", "false");
-    hillStyle.textContent = "Character styling";
     if (!inPlay) return;
     setStyleOpen(false);
     setup.append(dresser);
@@ -546,8 +532,7 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   function setHillChrome(which, note) {
     hillStart.hidden = which !== "host";
     hillLeave.hidden = which !== "leave" && which !== "host";
-    hillBack.hidden = which !== "back";
-    hillStyle.hidden = which === "none";
+    hillBar.hidden = hillStart.hidden && hillLeave.hidden;
     if (which === "none") closePlayStyle();
     const text = typeof note === "string" ? note : "";
     hillWait.hidden = text === "";
@@ -581,6 +566,15 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     setHillChrome,
     setCountdown,
     stylingOpen: () => !playStyle.hidden,
+    styleOpen: () => !dresser.hidden,
+    toggleStyle() {
+      if (!shell.hidden) {
+        setStyleOpen(dresser.hidden);
+        return;
+      }
+      if (playStyle.hidden) openPlayStyle();
+      else closePlayStyle();
+    },
     name: () => nameInput.value,
     look: () => ({ ...picked }),
     slots: () => Number(slotsSelect.value) || 2,
@@ -632,6 +626,47 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     rememberLook(localStorage, picked);
     preview.showLook(picked);
     onLook?.({ ...picked });
+    if (pirateButton) {
+      const on = picked.hat === "pirate" && picked.canShape === "barrel";
+      pirateButton.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+
+  function pressChoice(caption, label) {
+    const group = dresser.querySelector(`[aria-label="${caption}"]`);
+    if (!group) return;
+    for (const button of group.querySelectorAll("button")) {
+      const match = button.getAttribute("aria-label") === `${caption} ${label}`;
+      button.setAttribute("aria-pressed", match ? "true" : "false");
+    }
+  }
+
+  function pirateRow() {
+    const wrap = document.createElement("div");
+    wrap.className = "lobby-pick";
+    const captionEl = document.createElement("span");
+    captionEl.textContent = "Pirate";
+    const row = document.createElement("div");
+    row.className = "lobby-icons";
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", "Pirate");
+    pirateButton = document.createElement("button");
+    pirateButton.type = "button";
+    pirateButton.title = "Pirate hat and wooden barrel";
+    pirateButton.setAttribute("aria-label", "Pirate");
+    const on = picked.hat === "pirate" && picked.canShape === "barrel";
+    pirateButton.setAttribute("aria-pressed", on ? "true" : "false");
+    pirateButton.innerHTML = `${pirateIcon()}<span>Pirate</span>`;
+    pirateButton.addEventListener("click", () => {
+      picked.hat = "pirate";
+      picked.canShape = "barrel";
+      commitLook();
+      pressChoice("Hat", "Pirate");
+      pressChoice("Shape", "Barrel");
+    });
+    row.append(pirateButton);
+    wrap.append(captionEl, row);
+    return wrap;
   }
 
   function groupLabel(text) {
@@ -749,6 +784,17 @@ function complexionIcon(item) {
   return svg(`<circle cx="24" cy="22" r="11" fill="currentColor"${wash}/>${cheeks}${dots}`);
 }
 
+function hatIcon(item) {
+  if (item.id === "pirate") {
+    return svg(`<path d="M6 30 L14 22 H34 L42 30 L36 27 L31 36 L24 24 L17 36 L12 27 Z" fill="currentColor"/><path d="M18 22 H30 L28 12 H20 Z" fill="currentColor"/><path d="M14 16 L8 6" stroke="currentColor" stroke-width="2" fill="none"/>`);
+  }
+  return svg(`<circle cx="24" cy="22" r="10" fill="none" stroke="currentColor" stroke-width="2"/>`);
+}
+
+function pirateIcon() {
+  return svg(`<path d="M8 16 L14 10 H34 L40 16 L35 14 L30 20 L24 12 L18 20 L13 14 Z" fill="currentColor"/><path d="M18 10 H30 L28 4 H20 Z" fill="currentColor"/><path d="M16 30 Q24 26 32 30 L34 44 Q24 48 14 44 Z" fill="currentColor"/><path d="M15 36 H33 M15 40 H33" stroke="#14110e" stroke-width="1.6" fill="none"/>`);
+}
+
 function hairIcon(item) {
   if (item.id === "bald") return svg(`<circle cx="24" cy="24" r="12" fill="none" stroke="currentColor" stroke-width="2"/>`);
   if (item.id === "long") {
@@ -768,8 +814,12 @@ function canIcon(item) {
     taper: "M18 38 L14 8 H34 L30 38 Z",
     oval: "M12 10 Q24 4 36 10 L34 38 Q24 44 14 38 Z",
     flare: "M20 40 L12 8 H36 L28 40 Z",
+    barrel: "M17 8 Q24 3 31 8 Q38 24 31 40 Q24 45 17 40 Q10 24 17 8 Z",
   };
-  return svg(`<path d="${profiles[item.id] || profiles.round}" fill="currentColor"/>`);
+  const hoops = item.id === "barrel"
+    ? `<path d="M12 16 H36 M11 24 H37 M12 33 H36" stroke="#14110e" stroke-width="2" fill="none"/>`
+    : "";
+  return svg(`<path d="${profiles[item.id] || profiles.round}" fill="currentColor"/>${hoops}`);
 }
 
 function sizeIcon(item) {

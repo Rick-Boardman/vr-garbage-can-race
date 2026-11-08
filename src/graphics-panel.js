@@ -65,14 +65,23 @@ function contains(box, x, y) {
   return x >= box.x && y >= box.y && x < box.x + box.w && y < box.y + box.h;
 }
 
+function noteLinesOf(notes) {
+  if (typeof notes !== "function") return [];
+  const lines = notes();
+  if (!Array.isArray(lines)) return [];
+  return lines.map((line) => String(line ?? "")).filter((line) => line !== "");
+}
+
 // Pin the settings window to the top-right until the rider drags or resizes it.
 // moved is sticky. A later call must not write the corner back over the drop.
 export function nextSettingsPlacement(win, layoutW, moved = false) {
   if (!win || !(layoutW >= 320)) return !!moved;
   const dragging = !!win.dragging || !!win.resizing;
+  if (!(win.minW >= 440)) win.minW = 440;
+  if (!(win.minH >= 520)) win.minH = 520;
   if (!moved && !dragging) {
     if (win.w < 420) win.w = 440;
-    if (win.h < 360) win.h = 390;
+    if (win.h < 520) win.h = 520;
   }
   if (dragging) return true;
   // Closed windows sit offscreen. Pulling them back would reopen the panel.
@@ -123,7 +132,7 @@ export function panelLayout(width, height, tiers) {
   return { status, quality, options, ratio, automatic, volume, mute, calibrate };
 }
 
-export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer }) {
+export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, notes = null }) {
   let mesh = null;
   let texture = null;
   let canvas = null;
@@ -395,6 +404,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer })
   function paint(win) {
     const blink = ratioFocused && Math.floor(performance.now() / 450) % 2 === 0;
     const audio = calibration.audio;
+    const noteLines = noteLinesOf(notes);
     const sig = [
       win.w,
       win.h,
@@ -410,6 +420,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer })
       blink,
       hoverKey,
       shown(win),
+      noteLines.join("\n"),
     ].join("|");
     if (sig === signature && texture) return;
     signature = sig;
@@ -446,6 +457,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer })
     drawSlider(layout.volume, audio.level);
     drawCheck(layout.mute, "Mute", audio.muted, hoverKey === "mute");
     drawButton(layout.calibrate, "Calibrate again", hoverKey === "calibrate");
+    drawNotes(layout.calibrate, noteLines);
     if (menuOpen) {
       for (const option of layout.options) {
         drawOption(option, option.name, option.index === calibration.index || hoverKey === option.name);
@@ -471,6 +483,19 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer })
     }
     texture.needsUpdate = true;
     material.needsUpdate = true;
+  }
+
+  function drawNotes(anchor, lines) {
+    if (!view || !lines.length) return;
+    view.font = "14px Segoe UI, Trebuchet MS, sans-serif";
+    view.fillStyle = INK;
+    view.textAlign = "left";
+    view.textBaseline = "middle";
+    let y = anchor.y + anchor.h + 22;
+    for (const line of lines) {
+      view.fillText(line, PAD, y);
+      y += 20;
+    }
   }
 
   function drawStatus(box, text) {

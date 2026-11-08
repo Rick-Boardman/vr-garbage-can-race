@@ -729,7 +729,8 @@ function shellHex(rider) {
   rider.root.traverse((object) => {
     if (found || !object.isMesh) return;
     if (object.name === "can-round" || object.name === "can-square" || object.name === "can-drum"
-      || object.name === "can-taper" || object.name === "can-oval" || object.name === "can-flare") {
+      || object.name === "can-taper" || object.name === "can-oval" || object.name === "can-flare"
+      || object.name === "can-barrel") {
       found = object;
     }
   });
@@ -754,6 +755,145 @@ test("men and women differ in the body and the face", () => {
   assert.equal(findNamed(town, "person-lashes"), null);
   assert.equal(findNamed(town, "person-brow-ridge"), null);
   assert.ok(meshAtY(woman, 1.24).scale.x < meshAtY(man, 1.24).scale.x);
+});
+
+test("a seated skirt stays inside the can and a standing one keeps its hem", () => {
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const look = { ...defaultLook(), body: "woman", bottom: "skirt" };
+  function worldHem(rider) {
+    const skirt = findNamed(rider.person, "person-skirt");
+    const pos = skirt.geometry.attributes.position;
+    let hem = 0;
+    for (let i = 0; i < pos.count; i += 1) {
+      if (pos.getY(i) > 0.02) continue;
+      hem = Math.max(hem, Math.hypot(pos.getX(i), pos.getZ(i)));
+    }
+    return { skirt, hem, world: hem * skirt.scale.x * rider.person.scale.x };
+  }
+  const round = createRider(THREE, materials, props, { ...look, canShape: "round" });
+  const seated = worldHem(round);
+  assert.ok(seated.hem > 0.72, `hem ${seated.hem} lost its flare`);
+  assert.ok(seated.skirt.scale.x < 1, "riding skirt is still full width");
+  assert.ok(seated.world < 0.41, `round hem sticks out at ${seated.world}`);
+  round.person.userData.pose = "stand";
+  animatePerson(round.person, 0);
+  assert.equal(worldHem(round).skirt.scale.x, 1);
+  assert.ok(worldHem(round).world > 0.72 * round.person.scale.x * 0.95);
+  const barrel = createRider(THREE, materials, props, { ...look, canShape: "barrel" });
+  const cask = worldHem(barrel);
+  assert.ok(cask.world < 0.38, `barrel hem sticks out at ${cask.world}`);
+  const oval = createRider(THREE, materials, props, { ...look, canShape: "oval" });
+  assert.ok(worldHem(oval).world < 0.27, `oval hem sticks out at ${worldHem(oval).world}`);
+  barrel.person.userData.pose = "walk";
+  animatePerson(barrel.person, 0);
+  assert.equal(findNamed(barrel.person, "person-skirt").scale.x, 1);
+});
+
+test("a pirate hat and a wooden barrel are part of the look", () => {
+  const legacy = acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a });
+  assert.equal(legacy.hat, "none");
+  assert.equal(legacy.canShape, "round");
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, hat: "crown" }).hat, "none");
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, hat: "pirate" }).hat, "pirate");
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, canShape: "barrel" }).canShape, "barrel");
+  assert.equal(acceptedLook({ shirtRand: 0.2, can: 0x2f7d4a, canShape: "cask" }).canShape, "round");
+  assert.notEqual(lookKey(legacy), lookKey({ ...legacy, hat: "pirate" }));
+  assert.notEqual(lookKey(legacy), lookKey({ ...legacy, canShape: "barrel" }));
+
+  const materials = createMaterials(THREE);
+  const props = createProps(THREE, materials);
+  const town = props.createPerson(() => 0.2, "walk");
+  assert.equal(findNamed(town, "person-pirate-hat"), null);
+  const plain = createRider(THREE, materials, props, defaultLook());
+  assert.equal(findNamed(plain.person, "person-pirate-hat"), null);
+  assert.equal(findNamed(plain.root, "can-barrel"), null);
+
+  const rider = createRider(THREE, materials, props, {
+    ...defaultLook(),
+    hat: "pirate",
+    hair: "long",
+    canShape: "barrel",
+    can: 0xc23b3b,
+    canMaterial: "rubber",
+    logo: "star",
+  });
+  const hat = findNamed(rider.person, "person-pirate-hat");
+  assert.ok(hat);
+  assert.ok(findNamed(rider.person, "person-hair-long"));
+  const head = findNamed(rider.person, "person-head");
+  head.geometry.computeBoundingBox();
+  const skullTop = head.geometry.boundingBox.max.y * head.scale.y;
+  assert.ok(hat.position.y >= skullTop - 0.04, `hat y ${hat.position.y} skull ${skullTop}`);
+  const brim = findNamed(hat, "person-pirate-brim");
+  assert.ok(findNamed(hat, "person-pirate-skull").position.z < 0, "skull faces -z");
+
+  const front = findNamed(hat, "person-pirate-front");
+  front.updateMatrix();
+  const frontEdge = new THREE.Vector3(0, 0, -0.5).applyMatrix4(front.matrix);
+  assert.ok(frontEdge.y > brim.position.y + 0.02, `front brim does not cock up, y ${frontEdge.y}`);
+  assert.ok(frontEdge.z < -0.25, `front brim is not on -z, z ${frontEdge.z}`);
+  // Hat scale is uniform. The cocked point has to clear the face, which is local -z.
+  assert.ok(frontEdge.z * hat.scale.x < -head.scale.z, `front point ${frontEdge.z} stays inside the face`);
+  const left = findNamed(hat, "person-pirate-left");
+  left.updateMatrix();
+  const leftEdge = new THREE.Vector3(-0.5, 0, 0).applyMatrix4(left.matrix);
+  assert.ok(leftEdge.y > left.position.y, "left cock does not lift");
+  assert.ok(leftEdge.x < left.position.x, "left cock is not on -x");
+  assert.ok(leftEdge.x * hat.scale.x < -head.scale.x, `side point ${leftEdge.x} stays inside the skull`);
+  const feather = findNamed(hat, "person-pirate-feather");
+  feather.updateMatrix();
+  const tip = new THREE.Vector3(0, 0.5, 0).applyMatrix4(feather.matrix);
+  assert.ok(tip.x < feather.position.x, "feather tip does not lean left");
+  assert.ok(tip.y > feather.position.y, "feather tip does not rise");
+  assert.ok(tip.z > feather.position.z, "feather tip does not sweep back");
+
+  const shell = findNamed(rider.root, "can-barrel");
+  assert.ok(shell);
+  assert.equal(findNamed(rider.root, "can-round"), null);
+  assert.equal(findNamed(rider.root, "can-band"), null);
+  assert.notEqual(shell.material.color.getHex(), 0xc23b3b);
+  assert.equal(shell.material.side, THREE.DoubleSide);
+  assert.ok((shell.material.metalness ?? 0) < 0.2);
+  const again = createRider(THREE, materials, props, { ...defaultLook(), canShape: "barrel", can: 0x2f7d4a });
+  assert.equal(findNamed(again.root, "can-barrel").material.color.getHex(), shell.material.color.getHex());
+  const pos = shell.geometry.attributes.position;
+  const nrm = shell.geometry.attributes.normal;
+  let belly = 0;
+  let outward = 0;
+  let seen = 0;
+  for (let i = 0; i < pos.count; i += 1) {
+    if (Math.abs(pos.getY(i) - 0.34) > 0.06) continue;
+    if (Math.abs(pos.getX(i)) > 0.05) continue;
+    if (pos.getZ(i) > 0.2) belly = Math.max(belly, pos.getZ(i));
+    if (pos.getZ(i) > 0.3) {
+      seen += 1;
+      outward += nrm.getZ(i);
+    }
+  }
+  assert.ok(belly > 0.35, `barrel belly z ${belly}`);
+  assert.ok(seen > 0 && outward > 0, `barrel normals face inward (${outward})`);
+  const logo = findNamed(rider.root, "can-logo");
+  assert.ok(logo.position.z > belly, `logo buried, z ${logo.position.z} belly ${belly}`);
+  assert.ok(logo.position.z < belly + 0.03, `logo floats, z ${logo.position.z} belly ${belly}`);
+  const hoops = [];
+  const staves = [];
+  rider.root.traverse((object) => {
+    if (object.name === "can-hoop") hoops.push(object);
+    if (object.name === "can-stave") staves.push(object);
+  });
+  assert.equal(hoops.length, 3);
+  assert.equal(staves.length, 12);
+  const mid = hoops.find((hoop) => Math.abs(hoop.position.y - 0.5) < 0.02);
+  assert.ok(mid.scale.x > belly && mid.scale.x < 0.52, `hoop radius ${mid.scale.x}`);
+  const seam = staves[0];
+  seam.updateMatrix();
+  const out = new THREE.Vector3(0, 0, 0.5).applyMatrix4(seam.matrix);
+  const center = new THREE.Vector3().applyMatrix4(seam.matrix);
+  assert.ok(Math.hypot(out.x, out.z) > Math.hypot(center.x, center.z) + 0.004, "stave faces inward");
+  const floor = findNamed(rider.root, "can-floor");
+  assert.equal(floor.material, shell.material);
+  assert.ok(findNamed(rider.root, "can-rim"));
 });
 
 function bandMesh(rider) {

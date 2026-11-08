@@ -53,6 +53,12 @@ export const HAIR_STYLES = [
   { id: "bald", label: "Bald" },
 ];
 
+// None is the default, so a saved look from before hats stays bare-headed.
+export const HATS = [
+  { id: "none", label: "None" },
+  { id: "pirate", label: "Pirate" },
+];
+
 // Same order props.js uses for an unstyled person. Do not sort these.
 export const SKIN_DRAW = [0xf0c2a0, 0xd9a47a, 0xc6865a, 0x8d5a3c, 0xf3d3b8];
 export const HAIR_DRAW = [0x2a211c, 0x5a3a28, 0xc4a15a, 0x1a1a1a, 0x6a6a6a, 0x8b3a2a];
@@ -121,6 +127,7 @@ export const CAN_SHAPES = [
   { id: "taper", label: "Taper" },
   { id: "oval", label: "Oval" },
   { id: "flare", label: "Flare" },
+  { id: "barrel", label: "Barrel" },
 ];
 
 export const LOOK_STORE = "gcr.look.v1";
@@ -192,6 +199,7 @@ export function acceptedLook(raw) {
     top: choice(TOPS, raw?.top, "tee"),
     bottom: choice(BOTTOMS, raw?.bottom, "pants"),
     hair: choice(HAIR_STYLES, raw?.hair, "short"),
+    hat: choice(HATS, raw?.hat, "none"),
     skin,
     hairColor,
     complexion: choice(COMPLEXIONS, raw?.complexion, "even"),
@@ -213,6 +221,7 @@ export function lookKey(raw) {
     look.top,
     look.bottom,
     look.hair,
+    look.hat,
     look.skin,
     look.hairColor,
     look.complexion,
