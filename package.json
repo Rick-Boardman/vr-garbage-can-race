@@ -19,7 +19,7 @@
     "look": "node scripts/look.mjs"
   },
   "dependencies": {
-    "@rb/halo": "github:Rick-Boardman/vr-halo#v0.2.4",
+    "@rb/halo": "github:Rick-Boardman/vr-halo#v0.2.5",
     "three": "0.160.1",
     "troika-three-text": "0.52.4"
   }
