@@ -1,10 +1,6 @@
 import * as THREE from "three";
 import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb/halo";
 import { createHudChatPanel } from "../node_modules/@rb/halo/src/ui/chat-panel.js";
-import {
-  HUD_LAYOUT_DEFAULT_HEIGHT_PX,
-  HUD_LAYOUT_DEFAULT_WIDTH_PX,
-} from "../node_modules/@rb/halo/src/hud-layout-policy.js";
 
 import { createSound } from "./audio.js";
 import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js";
@@ -44,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { keepVrPanelsOnSlab } from "./vr-chrome.js";
+import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -381,6 +377,8 @@ const boot = createSceneHudBootstrap({
     uiPreset: "minimal",
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
+    vrLayoutW: VR_LAYOUT_W,
+    vrLayoutH: VR_LAYOUT_H,
     onHotbarSlot({ index }) {
       if (index === HOTBAR.camera) cycleView();
       else if (index === HOTBAR.course) pressNew();
@@ -554,12 +552,14 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Leave Halo's VR auto-layout alone. It puts open panels on the slab.
-  // Pull any that land outside that slab back into view.
-  keepVrPanelsOnSlab({
-    windows: hudSystem?.hud?.ui?.windows,
-    layoutW: HUD_LAYOUT_DEFAULT_WIDTH_PX,
-    layoutH: HUD_LAYOUT_DEFAULT_HEIGHT_PX,
+  // Halo grids open windows across the forward picture and pins the hotbar
+  // off to the side. Restage both into the side columns so the road stays
+  // clear and the panels stay reachable.
+  const hud = hudSystem?.hud;
+  stageVrPanels({
+    windows: hud?.ui?.windows,
+    layoutW: hud?.layoutW || VR_LAYOUT_W,
+    layoutH: hud?.layoutH || VR_LAYOUT_H,
   });
 }
 function captureVrDesktop() {
