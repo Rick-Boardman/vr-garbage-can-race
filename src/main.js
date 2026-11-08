@@ -39,6 +39,7 @@ import { createProps } from "./props.js";
 import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
+import { VIEWS, viewIndexFor, vrViewAnchor } from "./views.js";
 import {
   footDragStick,
   inputFromHands,
@@ -62,12 +63,6 @@ const HOTBAR = {
   leave: 6,
   lobby: 7,
 };
-const VIEWS = [
-  { id: "first", name: "first person", pivot: 1.62, cam: [0, 0, 0.12], pitch: -0.22, showPerson: false },
-  { id: "close", name: "just behind", pivot: 0.72, cam: [0, 1.45, 3.35], pitch: -0.32, showPerson: true },
-  { id: "far", name: "way back", pivot: 0.9, cam: [0, 4.8, 9.1], pitch: -0.42, showPerson: true },
-];
-
 function readBest() {
   try {
     const value = Number(sessionStorage.getItem(BEST_KEY));
@@ -100,7 +95,9 @@ let seenCrash = 0;
 let seenBumps = 0;
 let seenBump = 0;
 ride.best = readBest();
-let viewIndex = viewParam === "first" ? 0 : viewParam === "far" ? 2 : 1;
+let viewIndex = viewIndexFor(viewParam);
+let vrSeatEye = null;
+let head = null;
 let lastHeading = null;
 let yawAtFrameEnd = null;
 let dragIsTouch = false;
@@ -363,6 +360,7 @@ const boot = createSceneHudBootstrap({
       } else if (index === HOTBAR.lobby) backToLobby();
     },
     onEnterVR() {
+      vrSeatEye = null;
       const sample = sampleCourse(course, ride.s);
       if (!look) return;
       look.setYaw(headingYaw(sample.forward.x, sample.forward.z));
@@ -371,6 +369,7 @@ const boot = createSceneHudBootstrap({
       lastHeading = headingYaw(sample.forward.x, sample.forward.z);
     },
     onExitVR() {
+      vrSeatEye = null;
       if (!look) return;
       look.setPitch(0);
       look.setRoll(0);
@@ -404,6 +403,7 @@ api.audio = () => sound.status();
 const { scene, camera } = boot;
 hudSystem = boot.hudSystem;
 player = boot.rig.player;
+head = boot.rig.head;
 const enterVrButton = document.getElementById("enter-vr");
 if (enterVrButton) {
   enterVrButton.addEventListener("click", () => {
@@ -432,8 +432,8 @@ hudSystem.setHelpOverrideLines([
   "",
   "Camera",
   "V or 1 2 3 changes the camera.",
-  "1 looks out from inside the can.",
-  "2 looks from behind the can. 3 looks from farther back.",
+  "1 sits just behind the can, looking down the road and a bit to the right.",
+  "2 sits farther back. 3 looks out from the can.",
   "",
   "Headset",
   "Enter VR is the button at the top right.",
@@ -723,7 +723,7 @@ function placeWorld(presenting) {
       bodySpin: ejected.bodySpin || 0,
       bodyRoll: ejected.bodyRoll || 0,
       facing,
-      showPerson: view.showPerson && !presenting,
+      showPerson: view.showPerson,
       moving: Math.hypot(pending.throttle || 0, pending.strafe || 0) > 0.08
         || Math.hypot(ejected.bodyAlong || 0, ejected.bodyLat || 0) > 0.35,
     });
@@ -735,16 +735,32 @@ function placeWorld(presenting) {
       ride.spin,
       bank,
       meshHop,
-      view.showPerson && !presenting,
+      view.showPerson,
     );
   }
   rider.animate(elapsed);
 
   if (presenting) {
-    player.position.set(followX, posed.y + shoulder + viewHop - 0.5, followZ);
+    const sensed = Number(renderer?.xr?.getCamera?.()?.position?.y);
+    if (Number.isFinite(sensed)) {
+      if (vrSeatEye == null) vrSeatEye = sensed;
+      else if (vrSeatEye === 0 && Math.abs(sensed) > 0.2) vrSeatEye = sensed;
+    }
+    const originY = posed.y + shoulder + view.pivot + viewHop;
+    const eye = vrViewAnchor(
+      { x: followX, y: originY, z: followZ },
+      posed.right,
+      posed.forward,
+      view.cam,
+      view.pitch,
+      vrSeatEye ?? 0,
+    );
+    player.position.set(eye.x, eye.y, eye.z);
+    if (head) head.rotation.set(view.pitch, 0, 0);
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
   } else {
+    if (head) head.rotation.set(0, 0, 0);
     player.position.set(followX, posed.y + shoulder + view.pivot + viewHop, followZ);
     const kickScale = readExtreme() ? 0.35 : 0.012;
     const kick = ride.shake > 0.02 ? ride.shake * kickScale : 0;
