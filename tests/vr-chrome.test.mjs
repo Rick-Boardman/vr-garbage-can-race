@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as THREE from "three";
 
-import {
-  HUD_VR_DISTANCE_M,
-  HUD_VR_SURFACE_HEIGHT_M,
-  HUD_VR_SURFACE_WIDTH_M,
-} from "../node_modules/@rb/halo/src/hud-placement-policy.js";
-import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "../src/vr-chrome.js";
+import { keepVrWindowsOnSphere, placeHudMount } from "../src/vr-chrome.js";
 
 function windows() {
   return {
@@ -17,73 +13,40 @@ function windows() {
     status: { x: 360, y: -2000, w: 330, h: 64 },
     settings: { x: 200, y: -2000, w: 440, h: 520 },
     hotbar: { x: 2000, y: -10, w: 540, h: 84 },
-    xr: { x: 2000, y: -2000, w: 300, h: 136 },
+    xr: { x: 48, y: 48, w: 300, h: 136 },
   };
 }
 
-function yawSpan() {
-  return 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
-}
-
-function pitchSpan() {
-  return 2 * Math.atan((HUD_VR_SURFACE_HEIGHT_M * 0.5) / HUD_VR_DISTANCE_M);
-}
-
-function angDiff(a, b) {
-  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
-}
-
-function centerYaw(win) {
-  return ((win.x + win.w / 2) / VR_LAYOUT_W - 0.5) * yawSpan();
-}
-
-function centerPitch(win) {
-  return (0.5 - (win.y + win.h / 2) / VR_LAYOUT_H) * pitchSpan();
-}
-
-function overlaps(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-test("open panels sit in front of the look, including when the room yaw is large", () => {
-  for (const eyeYaw of [0, Math.PI, -1.4, 2.2]) {
-    for (const eyePitch of [0, -0.32, 0.4]) {
-      const hud = windows();
-      stageVrPanels({
-        windows: hud,
-        layoutW: VR_LAYOUT_W,
-        layoutH: VR_LAYOUT_H,
-        eyeYaw,
-        eyePitch,
-      });
-      assert.equal(hud.settings.y, -2000);
-      assert.equal(hud.debug.y, -2000);
-      assert.equal(hud.status.y, -2000);
-      for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) {
-        const yaw = angDiff(centerYaw(hud[key]), eyeYaw);
-        const pitch = centerPitch(hud[key]) - eyePitch;
-        assert.ok(Math.abs(yaw) < 0.45, `${key} yaw ${yaw} at eye ${eyeYaw}`);
-        assert.ok(Math.abs(pitch) < 0.55, `${key} pitch ${pitch} at eye ${eyePitch}`);
-        assert.ok(hud[key].y >= -900, `${key} was parked`);
-      }
-      for (const key of ["race", "help", "race-chat", "hotbar"]) {
-        assert.equal(overlaps(hud.xr, hud[key]), false, `${key} covers Exit VR at ${eyeYaw}`);
-      }
-    }
-  }
+test("Halo's layout stays put and a pin past the sphere is pulled back", () => {
+  const hud = windows();
+  keepVrWindowsOnSphere(hud, 1024, 640);
+  assert.equal(hud.race.x, 16);
+  assert.equal(hud.race.y, 16);
+  assert.equal(hud.help.x, 16);
+  assert.equal(hud["race-chat"].x, 448);
+  assert.equal(hud.xr.x, 48);
+  assert.equal(hud.debug.y, -2000);
+  assert.equal(hud.status.y, -2000);
+  assert.equal(hud.settings.y, -2000);
+  assert.ok(hud.hotbar.x >= 0 && hud.hotbar.x + hud.hotbar.w <= 1024, `hotbar x ${hud.hotbar.x}`);
+  assert.ok(hud.hotbar.y >= 0 && hud.hotbar.y + hud.hotbar.h <= 640, `hotbar y ${hud.hotbar.y}`);
 });
 
-test("an opened settings panel stays by the look and off Exit VR", () => {
-  const hud = windows();
-  hud.settings.y = 40;
-  stageVrPanels({
-    windows: hud,
-    layoutW: VR_LAYOUT_W,
-    layoutH: VR_LAYOUT_H,
-    eyeYaw: 1.7,
-    eyePitch: -0.2,
-  });
-  assert.ok(Math.abs(angDiff(centerYaw(hud.settings), 1.7)) < 0.45);
-  assert.equal(overlaps(hud.xr, hud.settings), false);
-  assert.ok(hud.settings.y >= -900);
+test("the mount keeps the sphere center fixed and the root at rotation 0", () => {
+  const pitch = new THREE.Group();
+  const mount = new THREE.Group();
+  const root = new THREE.Group();
+  pitch.add(mount);
+  root.position.set(0.35, 1.45, -0.2);
+  const anchor = root.position.clone();
+  placeHudMount(mount, root, Math.PI, -0.32);
+  assert.equal(root.parent, mount);
+  assert.equal(root.rotation.x, 0);
+  assert.equal(root.rotation.y, 0);
+  assert.equal(root.rotation.z, 0);
+  pitch.updateMatrixWorld(true);
+  const world = new THREE.Vector3();
+  root.getWorldPosition(world);
+  const expected = anchor.clone().applyMatrix4(pitch.matrixWorld);
+  assert.ok(world.distanceTo(expected) < 1e-4, `center moved ${world.distanceTo(expected)}`);
 });

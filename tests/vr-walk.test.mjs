@@ -14,6 +14,7 @@ import {
   vrJumpDown,
   vrStickPair,
 } from "../src/input.js";
+import { placeHudMount } from "../src/vr-chrome.js";
 import { VIEWS, referencePitch, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
@@ -235,10 +236,12 @@ test("a headset turned around in the room still looks down the road", () => {
   head.add(cam);
 
   const expected = new THREE.Vector3(0, 0, -1);
+  const mount = new THREE.Group();
   const hud = new THREE.Group();
   const hudQuat = new THREE.Quaternion();
   const panelDir = new THREE.Vector3();
-  pitchNode.add(hud);
+  pitchNode.add(mount);
+  hud.position.set(0.35, 1.45, -0.2);
   let eye = null;
   for (const turned of [0, Math.PI, -1.4, 2.2]) {
     for (const posePitch of [0, 0.35]) {
@@ -278,20 +281,13 @@ test("a headset turned around in the room still looks down the road", () => {
         else assert.ok(pos.distanceTo(eye) < 1e-4, `eye moved ${pos.distanceTo(eye)} at yaw ${turned}`);
       }
 
-      // The HUD root stays at rotation 0. Halo raycasts those live meshes
-      // after the frame. Its sphere yaw is positive toward +X, opposite the
-      // headset yaw, so a window at -poseYaw is what the rider is looking at.
-      hud.rotation.set(0, 0, 0);
+      // Halo raycasts hud.root at rotation 0. The mount, which Halo does
+      // not reset, turns that root onto the locked look.
+      placeHudMount(mount, hud, py, viewPitch + referencePitch(pose.x, pose.y, pose.z, pose.w));
       player.updateMatrixWorld(true);
-      const eyePitch = viewPitch + referencePitch(pose.x, pose.y, pose.z, pose.w);
-      const layoutYaw = -py;
-      panelDir.set(
-        Math.sin(layoutYaw) * Math.cos(eyePitch),
-        Math.sin(eyePitch),
-        -Math.cos(layoutYaw) * Math.cos(eyePitch),
-      );
+      assert.equal(hud.rotation.y, 0);
       hud.getWorldQuaternion(hudQuat);
-      panelDir.applyQuaternion(hudQuat).normalize();
+      panelDir.set(0, 0, -1).applyQuaternion(hudQuat).normalize();
       const camDir = new THREE.Vector3();
       cam.getWorldDirection(camDir);
       const aimed = camDir.dot(panelDir);

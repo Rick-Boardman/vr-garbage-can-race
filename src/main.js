@@ -40,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
+import { keepVrWindowsOnSphere, placeHudMount } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -105,8 +105,7 @@ let viewIndex = viewIndexFor(viewParam);
 let vrSeatEye = null;
 let vrChromeOn = false;
 let vrDesktop = null;
-let vrEyeYaw = 0;
-let vrEyePitch = 0;
+
 const stickLocks = new WeakMap();
 let head = null;
 let lastHeading = null;
@@ -400,8 +399,7 @@ const boot = createSceneHudBootstrap({
     uiPreset: "minimal",
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
-    vrLayoutW: VR_LAYOUT_W,
-    vrLayoutH: VR_LAYOUT_H,
+
     onHotbarSlot({ index }) {
       if (index === HOTBAR.camera) cycleView();
       else if (index === HOTBAR.course) pressNew();
@@ -460,6 +458,9 @@ hudSystem = boot.hudSystem;
 player = boot.rig.player;
 playerYaw = boot.rig.playerYaw;
 head = boot.rig.head;
+const hudMount = new THREE.Group();
+hudMount.name = "hud-mount";
+boot.rig.playerPitch.add(hudMount);
 const enterVrButton = document.getElementById("enter-vr");
 if (enterVrButton) {
   enterVrButton.addEventListener("click", () => {
@@ -498,7 +499,7 @@ hudSystem.setHelpOverrideLines([
   "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
   "The right stick turns the view and the way you walk. X or A jumps.",
-  "The panels sit on the sphere in front of the view. Point at one and pull the trigger.",
+  "The panels are the Halo HUD in front of the view. Point and pull the trigger.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -576,15 +577,10 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Root stays at rotation 0. Halo raycasts the live meshes after it
-  // forces that, so the windows themselves move to the look.
-  stageVrPanels({
-    windows: hudSystem?.hud?.ui?.windows,
-    layoutW: VR_LAYOUT_W,
-    layoutH: VR_LAYOUT_H,
-    eyeYaw: vrEyeYaw,
-    eyePitch: vrEyePitch,
-  });
+  // Halo places the windows. A pin past the layout is off the sphere the
+  // road lock can see, so only those get pulled back.
+  const hud = hudSystem?.hud;
+  keepVrWindowsOnSphere(hud?.ui?.windows, hud?.layoutW, hud?.layoutH);
 }
 function captureVrDesktop() {
   const windows = hudSystem?.hud?.ui?.windows;
@@ -872,15 +868,10 @@ function placeWorld(presenting) {
     const posePitch = poseQ ? referencePitch(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0;
     const placed = vrPresentRig(eye, heading, poseYaw, pitch, poseP);
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
-    // Halo draws this root, then sets its rotation to 0 and raycasts the
-    // live meshes. A quaternion here is gone before the click, so the ray
-    // lands on a panel that is no longer there. Leave the root at 0 and
-    // stage the windows at the look instead.
-    if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
-    // Halo's sphere yaw is positive toward +X. The headset's positive yaw
-    // looks the other way, toward -X, so the window center uses the opposite.
-    vrEyeYaw = -poseYaw;
-    vrEyePitch = pitch + posePitch;
+    // Halo raycasts hud.root after forcing its rotation to 0. The mount is
+    // the parent Halo does not touch, so the sphere stays on the look and
+    // the click hits the drawn mesh.
+    placeHudMount(hudMount, hudSystem?.hud?.root, poseYaw, pitch + posePitch);
     holdVrPanels();
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
