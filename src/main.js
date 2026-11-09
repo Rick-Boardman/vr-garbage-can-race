@@ -40,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { keepVrWindowsOnSphere, placeHudMount } from "./vr-chrome.js";
+import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -397,6 +397,8 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
+    vrLayoutW: VR_LAYOUT_W,
+    vrLayoutH: VR_LAYOUT_H,
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
 
@@ -499,7 +501,7 @@ hudSystem.setHelpOverrideLines([
   "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
   "The right stick turns the view and the way you walk. X or A jumps.",
-  "The panels are the Halo HUD in front of the view. Point and pull the trigger.",
+  "The panels sit at the sides of the view. The road stays clear.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -577,10 +579,12 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Halo places the windows. A pin past the layout is off the sphere the
-  // road lock can see, so only those get pulled back.
-  const hud = hudSystem?.hud;
-  keepVrWindowsOnSphere(hud?.ui?.windows, hud?.layoutW, hud?.layoutH);
+  // The mount aims the layout at the road. Keep the panels on the edges.
+  stageVrPanels({
+    windows: hudSystem?.hud?.ui?.windows,
+    layoutW: VR_LAYOUT_W,
+    layoutH: VR_LAYOUT_H,
+  });
 }
 function captureVrDesktop() {
   const windows = hudSystem?.hud?.ui?.windows;

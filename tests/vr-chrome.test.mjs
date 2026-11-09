@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { keepVrWindowsOnSphere, placeHudMount } from "../src/vr-chrome.js";
+import {
+  HUD_VR_DISTANCE_M,
+  HUD_VR_SURFACE_WIDTH_M,
+} from "../node_modules/@rb/halo/src/hud-placement-policy.js";
+import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "../src/vr-chrome.js";
 
 function windows() {
   return {
@@ -17,19 +21,31 @@ function windows() {
   };
 }
 
-test("Halo's layout stays put and a pin past the sphere is pulled back", () => {
+function overlapsRoad(win) {
+  const left = VR_LAYOUT_W * 0.28;
+  const right = VR_LAYOUT_W * 0.72;
+  return win.x < right && win.x + win.w > left;
+}
+
+function onEdge(win) {
+  assert.ok(win.y >= 0 && win.y + win.h <= VR_LAYOUT_H, `y ${win.y}`);
+  assert.ok(win.x >= 0 && win.x + win.w <= VR_LAYOUT_W, `x ${win.x}`);
+  const yawSpan = 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
+  const yaw = ((win.x + win.w / 2) / VR_LAYOUT_W - 0.5) * yawSpan;
+  assert.ok(Math.abs(yaw) < yawSpan * 0.5, `off the sphere ${yaw}`);
+  assert.equal(overlapsRoad(win), false);
+}
+
+test("open panels sit on the side of the sphere and the road stays clear", () => {
   const hud = windows();
-  keepVrWindowsOnSphere(hud, 1024, 640);
-  assert.equal(hud.race.x, 16);
-  assert.equal(hud.race.y, 16);
-  assert.equal(hud.help.x, 16);
-  assert.equal(hud["race-chat"].x, 448);
-  assert.equal(hud.xr.x, 48);
+  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
   assert.equal(hud.debug.y, -2000);
   assert.equal(hud.status.y, -2000);
   assert.equal(hud.settings.y, -2000);
-  assert.ok(hud.hotbar.x >= 0 && hud.hotbar.x + hud.hotbar.w <= 1024, `hotbar x ${hud.hotbar.x}`);
-  assert.ok(hud.hotbar.y >= 0 && hud.hotbar.y + hud.hotbar.h <= 640, `hotbar y ${hud.hotbar.y}`);
+  for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) onEdge(hud[key]);
+  hud.settings.y = 40;
+  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
+  onEdge(hud.settings);
 });
 
 test("the mount keeps the sphere center fixed and the root at rotation 0", () => {
