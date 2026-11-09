@@ -3,7 +3,7 @@ import test from "node:test";
 import * as THREE from "three";
 
 import { createCourse, sampleCourse } from "../src/course.js";
-import { nameTagScale } from "../src/name-tag.js";
+import { createNameTag, nameTagScale } from "../src/name-tag.js";
 import { createRideState, stepRide } from "../src/drive.js";
 import { CAN_COLORS, HAIR_COLORS, OLD_HAIR, RIDER_LOOKS, SKIN_COLORS, acceptedLook, defaultLook, faceHex, lookKey, nameBlock, recallLook, recallName, rememberLook, rememberName, togglePirate } from "../src/looks.js";
 import { createMaterials } from "../src/materials.js";
@@ -16,6 +16,8 @@ import {
   applyGuestFace,
   easePose,
   holdAtLine,
+  HOST_SILENCE_MS,
+  hostWentSilent,
   lerpPose,
   playSite,
   poseContacts,
@@ -106,6 +108,8 @@ test("easing follows the host pose and snaps when the cans are far apart", () =>
   assert.equal(eased.s, 4);
   const lead = easePose({ s: 5, offset: 0, speed: 2 }, { s: 5.4, offset: 0, speed: 2 }, 0.016);
   assert.equal(lead.s, 5);
+  const walking = easePose({ s: 20, offset: 1, speed: 3.4 }, { s: 18.6, offset: 1, speed: 3.4 }, 0.016);
+  assert.equal(walking.s, 20, "a walk stays ahead of a host pose one step behind");
   const guest = { eject: { face: 0 } };
   applyGuestFace(guest, { face: Math.PI });
   assert.equal(guest.eject.face, Math.PI);
@@ -964,6 +968,54 @@ test("a blank name is published blank and cannot chat", async () => {
   assert.equal(await client.chatTransport().send("hello"), false);
 });
 
+test("a four second hitch is not the host leaving", () => {
+  assert.equal(hostWentSilent(1000, 1000 + 4000), false);
+  assert.equal(hostWentSilent(1000, 1000 + HOST_SILENCE_MS), false);
+  assert.equal(hostWentSilent(1000, 1000 + HOST_SILENCE_MS + 1), true);
+  assert.equal(hostWentSilent(Number.NaN, 5000), false);
+});
+
+test("six riders and the fleet fit in one relay packet", () => {
+  const look = defaultLook();
+  const rider = {
+    slot: 0,
+    s: 123.45,
+    offset: -1.23,
+    speed: 12.34,
+    spin: 1.23,
+    hop: 0.5,
+    ejected: true,
+    canS: 120.11,
+    canOffset: 2.34,
+    bodyS: 118.5,
+    bodyOffset: -0.4,
+    face: 3.14,
+    ...look,
+    displayName: "ABCDEFGHIJKLMNOPQRSTUVWX",
+  };
+  const cars = Array.from({ length: 5 }, (_, index) => ({
+    id: `traffic-${index}`,
+    s: 180.25,
+    offset: -1.23,
+    speed: 8.5,
+    roll: 3.2,
+    dir: -1,
+    wreck: 1,
+    spin: 0.4,
+    hop: 0.2,
+    shift: 0.15,
+    paint: 0x2f6adf,
+  }));
+  const body = {
+    kind: "snapshot",
+    seq: 99999,
+    riders: Array.from({ length: 6 }, (_, slot) => ({ ...rider, slot })),
+    cars,
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(body));
+  assert.ok(bytes < 8192, `snapshot is ${bytes} bytes`);
+});
+
 test("a short name stays tall enough to read and a long name only grows wider", () => {
   const ada = nameTagScale(180, 100);
   const longer = nameTagScale(720, 100);
@@ -971,6 +1023,74 @@ test("a short name stays tall enough to read and a long name only grows wider", 
   assert.ok(ada.x > 0.4);
   assert.equal(longer.y, ada.y);
   assert.ok(longer.x > ada.x * 2);
+});
+
+test("a longer name allocates a new label texture", () => {
+  const previous = globalThis.document;
+  const canvases = [];
+  globalThis.document = {
+    createElement() {
+      const canvas = { width: 0, height: 0 };
+      canvases.push(canvas);
+      canvas.getContext = () => ({
+        measureText(text) {
+          return { width: String(text || "").length * 40 };
+        },
+        clearRect() {},
+        strokeText() {},
+        fillText() {},
+      });
+      return canvas;
+    },
+  };
+  class CanvasTexture {
+    constructor(canvas) {
+      this.width = canvas.width;
+      this.height = canvas.height;
+      this.disposed = false;
+    }
+    dispose() {
+      this.disposed = true;
+    }
+  }
+  class SpriteMaterial {
+    constructor(options) {
+      this.map = options.map;
+      this.userData = {};
+      this.needsUpdate = false;
+    }
+    dispose() {}
+  }
+  class Sprite {
+    constructor(material) {
+      this.material = material;
+      this.center = { set() {} };
+      this.scale = { set() {} };
+      this.visible = false;
+    }
+  }
+  const fake = {
+    CanvasTexture,
+    SpriteMaterial,
+    Sprite,
+    SRGBColorSpace: "srgb",
+    LinearFilter: "linear",
+  };
+  try {
+    const tag = createNameTag(fake);
+    tag.setText("A");
+    const first = tag.object.material.map;
+    tag.setText("A");
+    assert.equal(tag.object.material.map, first);
+    tag.setText("Arby");
+    const second = tag.object.material.map;
+    assert.notEqual(second, first);
+    assert.equal(first.disposed, true);
+    assert.ok(second.width > first.width, `second ${second.width} first ${first.width}`);
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
 });
 
 test("a rider wears their name above the head", () => {

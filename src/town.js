@@ -770,6 +770,7 @@ export function packTraffic(cars) {
       spin: round(car.wreck?.spin),
       hop: round(car.wreck?.hop),
       shift: round(car.wreck?.shift),
+      paint: car.paint >>> 0,
     };
   });
 }
@@ -792,6 +793,7 @@ export function createTown(THREE, scene, materials, props) {
 
   const cars = [];
   const trafficDraws = props.createDrawSet(scene);
+  let trafficSeed = null;
 
   function mark(w, h, d, material) {
     const mesh = new THREE.Mesh(box, material);
@@ -1392,9 +1394,33 @@ export function createTown(THREE, scene, materials, props) {
     return oncoming ? -mag : mag;
   }
 
+  function dropDrawn(object) {
+    if (!object) return;
+    scene.remove(object);
+    object.traverse((node) => {
+      if (node.geometry && !node.geometry.userData.shared) node.geometry.dispose();
+    });
+  }
+
+  function releaseTraffic() {
+    trafficDraws.reset();
+    for (const car of cars) {
+      dropDrawn(car.mesh);
+      dropDrawn(car.mesh?.userData?.smoke?.group);
+      dropDrawn(car.mesh?.userData?.exhaustFx?.group);
+    }
+    cars.length = 0;
+    trafficSeed = null;
+  }
+
+  // Cars are built once per hill seed. A guest already painted a fleet for
+  // their own hill; clear() keeps those meshes, so a new seed has to rebuild.
   function ensureCars(course) {
-    if (cars.length || !course) return;
-    const rand = mulberry32((course.seed ^ 0x51ed) >>> 0);
+    if (!course) return;
+    const seed = course.seed >>> 0;
+    if (cars.length && trafficSeed === seed) return;
+    if (cars.length) releaseTraffic();
+    const rand = mulberry32((seed ^ 0x51ed) >>> 0);
     const fleet = TRAFFIC_FLEET;
     for (let index = 0; index < fleet.length; index += 1) {
       const style = fleet[index];
@@ -1416,12 +1442,14 @@ export function createTown(THREE, scene, materials, props) {
         speed: cruise,
         cruise,
         homeCruise: cruise,
+        paint: mesh.userData.paint >>> 0,
         roll: rand() * 4,
         dwell: 0,
         served: null,
       });
     }
     trafficDraws.finish();
+    trafficSeed = seed;
   }
 
   function recycleCar(car, rideS, rand, pace) {

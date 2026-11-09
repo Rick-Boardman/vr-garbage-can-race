@@ -927,6 +927,7 @@ export function createProps(THREE, materials) {
     addWheels(group, [[-0.8, -1.28], [0.8, -1.28], [-0.8, 1.28], [0.8, 1.28]]);
     addShadow(group, 1.35, 2.3);
     group.userData.kind = cop ? "cop" : "car";
+    group.userData.paint = paint;
     group.userData.halfL = 2.15;
     group.userData.halfW = 0.95;
     group.userData.roof = cop ? 1.42 : 1.45;
@@ -1045,6 +1046,7 @@ export function createProps(THREE, materials) {
     addWheels(group, [[-1.02, -2.15], [1.02, -2.15], [-1.02, 0.55], [1.02, 0.55], [-1.02, 1.7], [1.02, 1.7]], 1.12);
     addShadow(group, 1.6, 3.4);
     group.userData.kind = "truck";
+    group.userData.paint = paint;
     group.userData.halfL = 3.35;
     group.userData.halfW = 1.15;
     group.userData.roof = 1.95;
@@ -1119,6 +1121,7 @@ export function createProps(THREE, materials) {
     addWheels(group, [[-1.15, -3.15], [1.15, -3.15], [-1.15, 3.15], [1.15, 3.15]], 1.2);
     addShadow(group, 1.7, 5.1);
     group.userData.kind = "bus";
+    group.userData.paint = paint;
     group.userData.halfL = 4.9;
     group.userData.halfW = 1.28;
     group.userData.roof = 2.72;
@@ -2081,7 +2084,15 @@ export function createProps(THREE, materials) {
       sets.clear();
     }
 
-    return { adopt, finish, sync, dispose };
+    // finish() closes the set. A new hill has to open it again or the next
+    // fleet is never drawn.
+    function reset() {
+      dispose();
+      closed = false;
+      pending.length = 0;
+    }
+
+    return { adopt, finish, sync, dispose, reset };
   }
 
   return {

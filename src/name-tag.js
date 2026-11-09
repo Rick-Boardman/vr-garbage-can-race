@@ -15,17 +15,15 @@ export function nameTagScale(pixelWidth, pixelHeight) {
 
 // A camera-facing label. The sprite's origin is its bottom center, so the
 // rider can sit that point on the crown and the glyphs hang above the head.
+// WebGL2 allocates a canvas texture once. Growing the canvas later still
+// uploads into that first size, so a name shows as its first letter.
 export function createNameTag(THREE) {
   const canvas = typeof document === "undefined" ? null : document.createElement("canvas");
   let texture = null;
-  if (canvas) {
-    canvas.width = 64;
-    canvas.height = 64;
-    texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-  }
+  let uploadedWidth = 0;
+  let uploadedHeight = 0;
   const material = new THREE.SpriteMaterial({
-    map: texture,
+    map: null,
     color: 0xffffff,
     transparent: true,
     depthWrite: false,
@@ -38,13 +36,29 @@ export function createNameTag(THREE) {
   sprite.scale.set(0.8, TAG_HEIGHT, 1);
   let painted = null;
 
+  function bindTexture(width, height) {
+    const next = new THREE.CanvasTexture(canvas);
+    next.colorSpace = THREE.SRGBColorSpace;
+    next.generateMipmaps = false;
+    next.minFilter = THREE.LinearFilter;
+    next.magFilter = THREE.LinearFilter;
+    const previous = texture;
+    texture = next;
+    material.map = next;
+    material.needsUpdate = true;
+    uploadedWidth = width;
+    uploadedHeight = height;
+    previous?.dispose();
+  }
+
   function setText(value) {
     const text = cleanName(value);
     if (text === painted) return text;
     painted = text;
     if (!canvas) return text;
     const ink = paintName(canvas, text);
-    texture.needsUpdate = true;
+    if (!texture || ink.width !== uploadedWidth || ink.height !== uploadedHeight) bindTexture(ink.width, ink.height);
+    else texture.needsUpdate = true;
     const scale = nameTagScale(ink.width, ink.height);
     sprite.scale.set(scale.x, scale.y, 1);
     return text;

@@ -17,6 +17,7 @@ import {
   contactsOf,
   easePose,
   holdAtLine,
+  hostWentSilent,
   playBase,
   playSite,
   poseContacts,
@@ -31,7 +32,7 @@ import {
 import { createRemoteRiders } from "./remotes.js";
 import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, wrapAngle } from "./course.js";
 import { createDaylight } from "./daylight.js";
-import { createRideState, stepRide, walkerForward } from "./drive.js";
+import { STRAFE_SPEED, WALK_SPEED, createRideState, stepRide, walkerForward } from "./drive.js";
 import { createExtremeScraps, readExtreme } from "./extreme.js";
 import { acceptedLook, cleanName, lookKey, nameBlock } from "./looks.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "./look.js";
@@ -1548,7 +1549,7 @@ function onPartyEvent(event) {
 }
 
 function noteHostSilence() {
-  if (gate === "racing" && partyMode === "player" && sawSnapshot && performance.now() - lastSnapshotAt > 4000) {
+  if (gate === "racing" && partyMode === "player" && sawSnapshot && hostWentSilent(lastSnapshotAt, performance.now())) {
     leaveParty("The host left.");
   }
 }
@@ -1638,9 +1639,13 @@ function easeLocalRider(step, now) {
     );
     ride.eject.canS = canEased.s;
     ride.eject.canOffset = canEased.offset;
+    // Walking writes bodyS directly, so bodyAlong stays near 0. The lead has
+    // to see the stick the guest is holding or the host pose drags them back.
+    const walk = Math.hypot((pending.throttle || 0) * WALK_SPEED, (pending.strafe || 0) * STRAFE_SPEED);
+    const thrown = Math.hypot(ride.eject.bodyAlong || 0, ride.eject.bodyLat || 0);
     const bodyEased = easePose(
-      { s: ride.eject.bodyS, offset: ride.eject.bodyOffset, speed: 0 },
-      { s: mine.bodyS, offset: mine.bodyOffset, speed: mine.speed },
+      { s: ride.eject.bodyS, offset: ride.eject.bodyOffset, speed: Math.max(walk, thrown) },
+      { s: mine.bodyS, offset: mine.bodyOffset, speed: Math.max(walk, thrown) },
       step,
     );
     ride.eject.bodyS = bodyEased.s;

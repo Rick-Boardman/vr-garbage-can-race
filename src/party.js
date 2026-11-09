@@ -96,9 +96,12 @@ export function easePose(local, remote, step) {
   if (gap > 12) {
     return { s: Number(remote?.s) || 0, offset: Number(remote?.offset) || 0, speed: Number(remote?.speed) || 0 };
   }
-  // The guest already walked this step. A short lead is not a miss, so the
-  // host pose does not drag them backward.
-  if (gap < 0.8) {
+  // The guest already walked this step. The host pose is a round trip behind
+  // that walk. A fast can still eases once the gap is more than a short lead,
+  // so a real miss is not ignored.
+  const speed = Math.max(Math.abs(Number(local?.speed) || 0), Math.abs(Number(remote?.speed) || 0));
+  const lead = 0.8 + Math.min(speed, 8) * 0.35;
+  if (gap < lead) {
     return {
       s: Number(local?.s) || 0,
       offset: Number(local?.offset) || 0,
@@ -386,6 +389,17 @@ function segmentHits(s0, offset0, s1, offset1, radius, blocks) {
     if (ds * ds + dOffset * dOffset < reach * reach) return true;
   }
   return false;
+}
+
+// Snapshots can pause while a headset hitches. The socket closing is still
+// an immediate leave. This is only the backup when the socket stays open.
+export const HOST_SILENCE_MS = 12000;
+
+export function hostWentSilent(sinceMs, nowMs, limitMs = HOST_SILENCE_MS) {
+  const since = Number(sinceMs);
+  const now = Number(nowMs);
+  if (!Number.isFinite(since) || !Number.isFinite(now)) return false;
+  return now - since > limitMs;
 }
 
 export function takeJump(state, stick) {

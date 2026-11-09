@@ -56,7 +56,9 @@ import {
   yardFenceLine,
   yardGradeShear,
   slopeWithGrade,
+  createTown,
 } from "../src/town.js";
+import { createMaterials } from "../src/materials.js";
 import { AWNING_PITCH, BENCH, SIGN_BOARD_Z, SIGN_POLE_Z, SITTER, animatePerson, createFlop, createProps, onFootPose, poseForTravel, stepFlop } from "../src/props.js";
 import { createDaylight } from "../src/daylight.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "../src/look.js";
@@ -1849,6 +1851,7 @@ test("on foot, cars stop for the rider and the rider does not walk through them"
   assert.equal(packed[0].id, "traffic-0");
   assert.equal(packed[0].s, 12.35);
   assert.equal(packed[0].dir, 1);
+  assert.equal(packed[0].paint, 0);
 
   foot.offset = 4;
   into.prevS = into.s;
@@ -2261,4 +2264,47 @@ test("dusk is a warm sunset and far buildings still fade", () => {
   assert.ok(sun.intensity > 1.1, `sun ${sun.intensity}`);
   assert.ok(sun.color.r > sun.color.b, "sun is warm");
   assert.ok(scene.fog.color.r > scene.fog.color.g, "fog stays a warm fade");
+});
+
+test("a new hill repaints traffic for that hill's seed", () => {
+  const previous = globalThis.document;
+  globalThis.document = {
+    createElement() {
+      const canvas = { width: 32, height: 32 };
+      canvas.getContext = () => new Proxy({}, {
+        get(_target, key) {
+          if (key === "measureText") return () => ({ width: 12 });
+          return () => {};
+        },
+        set() {
+          return true;
+        },
+      });
+      return canvas;
+    },
+  };
+  try {
+    const scene = new THREE.Scene();
+    const materials = createMaterials(THREE);
+    const props = createProps(THREE, materials);
+    const town = createTown(THREE, scene, materials, props);
+    const body = { s: 40, offset: 0, radius: 0.5, speed: 0 };
+    const paints = () => town.fleet().map((car) => car.paint);
+    town.update(createCourse(4), 40, 0.016, 1, body);
+    const first = paints();
+    assert.equal(first.length, 5);
+    assert.ok(first.every((paint) => paint > 0));
+    town.clear();
+    town.update(createCourse(4), 40, 0.016, 1, body);
+    assert.deepEqual(paints(), first);
+    town.update(createCourse(9), 40, 0.016, 1, body);
+    const second = paints();
+    assert.equal(second.length, first.length);
+    assert.ok(second.some((paint, index) => paint !== first[index]));
+    town.update(createCourse(9), 40, 0.016, 1, body);
+    assert.deepEqual(paints(), second);
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
 });

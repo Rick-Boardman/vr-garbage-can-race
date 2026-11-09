@@ -14,8 +14,8 @@ const GRAVITY = 9.81;
 export const HARD_CRASH_SPEED = 9.5;
 const PLAIN_CAP = 24;
 const ROCKET_CAP = 30;
-const WALK_SPEED = 3.4;
-const STRAFE_SPEED = 3.1;
+export const WALK_SPEED = 3.4;
+export const STRAFE_SPEED = 3.1;
 const TURN_RATE = 3.4;
 const SHAKE_PEAK = 0.2;
 
