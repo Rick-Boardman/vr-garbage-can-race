@@ -1,11 +1,15 @@
-// The mount aims Halo's sphere at the locked look, and the root stays at
-// rotation 0 so the click hits the drawn mesh. That aim puts the middle of
-// the layout over the road. Open panels sit on the left and right edges of
-// the layout, which is the edge of the sphere, so the road stays clear and
-// the panels stay in the picture. A hidden window stays hidden. Exit VR is
-// pulled onto the right edge.
+// Halo's forward surface is about ±37°. A window on that cap covers the
+// road. Halo's own side pins sit further around the sphere: x = -1000 on
+// the left and x = 2000 on the right. Open panels go there. The mount does
+// not cancel headset yaw, so turning your head looks around the sphere and
+// brings a side panel into the locked picture. The root stays at rotation 0,
+// which is the transform Halo raycasts. A hidden window stays hidden.
 
 import * as THREE from "three";
+import {
+  HUD_VR_DISTANCE_M,
+  HUD_VR_SURFACE_HEIGHT_M,
+} from "../node_modules/@rb/halo/src/hud-placement-policy.js";
 
 const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisY = new THREE.Vector3(0, 1, 0);
@@ -26,8 +30,10 @@ export function placeHudMount(mount, root, poseYaw, eyePitch) {
   root.rotation.set(0, 0, 0);
 }
 
-export const VR_LAYOUT_W = 3200;
-export const VR_LAYOUT_H = 1600;
+// Same side pins Halo uses for hotbar and chat. They are outside the
+// forward layout, further around the sphere.
+export const VR_LEFT_X = -1000;
+export const VR_RIGHT_X = 2000;
 
 const GAP = 24;
 const LEFT_KEYS = ["race", "help", "hotbar"];
@@ -37,42 +43,49 @@ function isOpen(win) {
   return !!win && Number(win.y) >= -1000;
 }
 
-export function stageVrPanels({
-  windows,
-  layoutW = VR_LAYOUT_W,
-  layoutH = VR_LAYOUT_H,
-} = {}) {
+function pitchSpan() {
+  return 2 * Math.atan((HUD_VR_SURFACE_HEIGHT_M * 0.5) / Math.max(0.001, HUD_VR_DISTANCE_M));
+}
+
+export function stageVrPanels({ windows, layoutH = 640, eyePitch = 0 } = {}) {
   if (!windows) return;
-  const width = Math.max(1, Number(layoutW) || VR_LAYOUT_W);
-  const height = Math.max(1, Number(layoutH) || VR_LAYOUT_H);
+  const height = Math.max(1, Number(layoutH) || 640);
+  const look = Number(eyePitch) || 0;
   const placed = new Set();
 
-  function place(key, x, y, force) {
-    const win = windows[key];
-    if (!win || (!force && !isOpen(win))) return y;
-    const w = Math.max(1, Number(win.w) || 1);
-    const h = Math.max(1, Number(win.h) || 1);
-    const maxX = Math.max(0, width - w);
-    const maxY = Math.max(0, height - h);
-    win.x = Math.round(Math.min(maxX, Math.max(0, x)));
-    win.y = Math.round(Math.min(maxY, Math.max(0, y)));
-    placed.add(key);
-    return win.y + h + GAP;
+  function yAt(pitch, h) {
+    const cy = height * (0.5 - pitch / pitchSpan());
+    return cy - h / 2;
   }
 
-  let leftY = 0;
-  for (const key of LEFT_KEYS) leftY = place(key, 0, leftY, false);
-
-  let rightY = 0;
-  for (const key of RIGHT_KEYS) {
-    const w = Math.max(1, Number(windows[key]?.w) || 1);
-    rightY = place(key, width - w, rightY, key === "xr");
+  function stack(keys, x, forceKey) {
+    const items = [];
+    for (const key of keys) {
+      const win = windows[key];
+      if (!win || (key !== forceKey && !isOpen(win))) continue;
+      items.push({ key, win });
+    }
+    if (!items.length) return;
+    let total = 0;
+    for (const item of items) total += Math.max(1, Number(item.win.h) || 1);
+    total += GAP * (items.length - 1);
+    let y = yAt(look, total);
+    for (const item of items) {
+      const h = Math.max(1, Number(item.win.h) || 1);
+      item.win.x = Math.round(x);
+      item.win.y = Math.round(y);
+      if (item.win.y < -900) item.win.y = -900;
+      y = item.win.y + h + GAP;
+      placed.add(item.key);
+    }
   }
+
+  stack(LEFT_KEYS, VR_LEFT_X, null);
+  stack(RIGHT_KEYS, VR_RIGHT_X, "xr");
 
   for (const key of Object.keys(windows)) {
     if (placed.has(key) || !isOpen(windows[key])) continue;
-    const w = Math.max(1, Number(windows[key].w) || 1);
-    if (leftY <= rightY) leftY = place(key, 0, leftY, false);
-    else rightY = place(key, width - w, rightY, false);
+    const countLeft = placed.size;
+    stack([key], countLeft % 2 === 0 ? VR_LEFT_X : VR_RIGHT_X, key);
   }
 }

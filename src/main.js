@@ -40,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
+import { placeHudMount, stageVrPanels } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -397,8 +397,6 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
-    vrLayoutW: VR_LAYOUT_W,
-    vrLayoutH: VR_LAYOUT_H,
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
 
@@ -460,6 +458,7 @@ hudSystem = boot.hudSystem;
 player = boot.rig.player;
 playerYaw = boot.rig.playerYaw;
 head = boot.rig.head;
+let vrEyePitch = 0;
 const hudMount = new THREE.Group();
 hudMount.name = "hud-mount";
 boot.rig.playerPitch.add(hudMount);
@@ -501,7 +500,7 @@ hudSystem.setHelpOverrideLines([
   "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
   "The right stick turns the view and the way you walk. X or A jumps.",
-  "The panels sit at the sides of the view. The road stays clear.",
+  "The panels sit further around the sphere. Turn your head to bring one in.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -579,11 +578,12 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // The mount aims the layout at the road. Keep the panels on the edges.
+  // Halo's side pins, not the forward cap. The road stays in the middle.
+  const hud = hudSystem?.hud;
   stageVrPanels({
-    windows: hudSystem?.hud?.ui?.windows,
-    layoutW: VR_LAYOUT_W,
-    layoutH: VR_LAYOUT_H,
+    windows: hud?.ui?.windows,
+    layoutH: hud?.layoutH,
+    eyePitch: vrEyePitch,
   });
 }
 function captureVrDesktop() {
@@ -872,10 +872,10 @@ function placeWorld(presenting) {
     const posePitch = poseQ ? referencePitch(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0;
     const placed = vrPresentRig(eye, heading, poseYaw, pitch, poseP);
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
-    // Halo raycasts hud.root after forcing its rotation to 0. The mount is
-    // the parent Halo does not touch, so the sphere stays on the look and
-    // the click hits the drawn mesh.
-    placeHudMount(hudMount, hudSystem?.hud?.root, poseYaw, pitch + posePitch);
+    // The sphere stays level in the rig. Turning the head looks around it.
+    // The root stays at rotation 0, which is what Halo raycasts.
+    vrEyePitch = pitch + posePitch;
+    placeHudMount(hudMount, hudSystem?.hud?.root, 0, 0);
     holdVrPanels();
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);

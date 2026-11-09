@@ -6,7 +6,7 @@ import {
   HUD_VR_DISTANCE_M,
   HUD_VR_SURFACE_WIDTH_M,
 } from "../node_modules/@rb/halo/src/hud-placement-policy.js";
-import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "../src/vr-chrome.js";
+import { placeHudMount, stageVrPanels, VR_LEFT_X, VR_RIGHT_X } from "../src/vr-chrome.js";
 
 function windows() {
   return {
@@ -21,31 +21,31 @@ function windows() {
   };
 }
 
-function overlapsRoad(win) {
-  const left = VR_LAYOUT_W * 0.28;
-  const right = VR_LAYOUT_W * 0.72;
-  return win.x < right && win.x + win.w > left;
+function layoutYaw(win) {
+  const span = 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
+  return ((win.x + win.w / 2) / 1024 - 0.5) * span;
 }
 
-function onEdge(win) {
-  assert.ok(win.y >= 0 && win.y + win.h <= VR_LAYOUT_H, `y ${win.y}`);
-  assert.ok(win.x >= 0 && win.x + win.w <= VR_LAYOUT_W, `x ${win.x}`);
-  const yawSpan = 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
-  const yaw = ((win.x + win.w / 2) / VR_LAYOUT_W - 0.5) * yawSpan;
-  assert.ok(Math.abs(yaw) < yawSpan * 0.5, `off the sphere ${yaw}`);
-  assert.equal(overlapsRoad(win), false);
-}
-
-test("open panels sit on the side of the sphere and the road stays clear", () => {
+test("open panels sit on Halo's side pins, further around than the forward cap", () => {
   const hud = windows();
-  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
+  stageVrPanels({ windows: hud });
+  const cap = Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
   assert.equal(hud.debug.y, -2000);
   assert.equal(hud.status.y, -2000);
   assert.equal(hud.settings.y, -2000);
-  for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) onEdge(hud[key]);
+  assert.equal(hud.race.x, VR_LEFT_X);
+  assert.equal(hud.hotbar.x, VR_LEFT_X);
+  assert.equal(hud["race-chat"].x, VR_RIGHT_X);
+  assert.equal(hud.xr.x, VR_RIGHT_X);
+  assert.ok(hud.xr.y > -1000);
+  for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) {
+    const yaw = layoutYaw(hud[key]);
+    assert.ok(Math.abs(yaw) > cap, `${key} is still on the forward cap ${yaw}`);
+  }
   hud.settings.y = 40;
-  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
-  onEdge(hud.settings);
+  stageVrPanels({ windows: hud });
+  assert.equal(hud.settings.x, VR_RIGHT_X);
+  assert.ok(Math.abs(layoutYaw(hud.settings)) > cap);
 });
 
 test("the mount keeps the sphere center fixed and the root at rotation 0", () => {
