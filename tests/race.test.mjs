@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { carriageCenter, createCourse, checkCourseFrame, forkAt, frameFromTangent, headingYaw, holdCarriage, sampleCourse, stayOnRoute, wrapAngle } from "../src/course.js";
+import { branchCenter, carriageCenter, createCourse, checkCourseFrame, forkAt, frameFromTangent, headingYaw, holdCarriage, sampleCourse, stayOnRoute, wrapAngle } from "../src/course.js";
 import { checkRibbonFacesUp } from "../src/road.js";
 import { applyFrame } from "../src/frame.js";
 import {
@@ -175,6 +175,45 @@ test("routes diverge and then meet again", () => {
   home.speed = 8;
   stepRide(home, { dt: 0.05, steer: 0, throttle: 1, sample: joined, hazards: [] });
   assert.ok(Math.abs(home.offset) < 0.5);
+});
+
+test("a split-road dash sits in the middle of that road and points along it", () => {
+  const course = createCourse(7);
+  let opening = 0;
+  for (let s = 110; s < 500; s += 1) {
+    const sample = sampleCourse(course, s);
+    if (sample.fork.median > 1.2 && sample.fork.split < 0.55) {
+      opening = s;
+      break;
+    }
+  }
+  const here = sampleCourse(course, opening);
+  const center = (here.fork.median + here.halfWidth) / 2;
+  assert.ok(Math.abs(branchCenter(here, 1) - center) < 0.05, `right ${branchCenter(here, 1)} center ${center}`);
+  assert.ok(Math.abs(branchCenter(here, -1) + center) < 0.05);
+  assert.ok(Math.abs(carriageCenter(here, 1) - center) > 0.8, "the lane blend is still in the grass");
+  const plain = sampleCourse(course, 40);
+  assert.ok(plain.fork.median < 0.05);
+  assert.ok(Math.abs(branchCenter(plain, 1) - plain.halfWidth * 0.32) < 1e-6);
+
+  const back = sampleCourse(course, opening - 1.15);
+  const fore = sampleCourse(course, opening + 1.15);
+  const point = (sample, side) => {
+    const offset = branchCenter(sample, side);
+    return {
+      x: sample.x + sample.right.x * offset,
+      z: sample.z + sample.right.z * offset,
+    };
+  };
+  const a = point(back, 1);
+  const b = point(fore, 1);
+  const chord = frameFromTangent(b.x - a.x, 0, b.z - a.z);
+  const along = here.forward.x * chord.forward.x + here.forward.z * chord.forward.z;
+  assert.ok(along < 0.995, `dash still follows the shared centerline ${along}`);
+  const midX = (a.x + b.x) * 0.5;
+  const midZ = (a.z + b.z) * 0.5;
+  const lateral = (midX - here.x) * here.right.x + (midZ - here.z) * here.right.z;
+  assert.ok(Math.abs(lateral - center) < 0.35, `dash left the carriageway ${lateral} vs ${center}`);
 });
 
 test("road ribbons face up on the flat and on a slope", () => {

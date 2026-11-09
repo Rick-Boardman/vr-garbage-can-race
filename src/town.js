@@ -3,7 +3,7 @@
 
 import * as THREE from "three";
 import { applyFrame } from "./frame.js";
-import { carriageCenter, frameFromTangent, holdCarriage, sampleCourse, wrapAngle } from "./course.js";
+import { branchCenter, carriageCenter, frameFromTangent, holdCarriage, sampleCourse, wrapAngle } from "./course.js";
 import { edgesAlong, ribbonGeometry } from "./road.js";
 import { restCanTilt } from "./drive.js";
 import { SITTER, animatePerson, createFlop, isStepping, poseForTravel, stepFlop } from "./props.js";
@@ -1014,13 +1014,30 @@ export function createTown(THREE, scene, materials, props) {
     }
 
     for (let s = s0 + 3; s < s1; s += 7) {
-      const sample = sampleCourse(course, s + 1);
       for (const side of [-1, 1]) {
+        const at = s + 1;
+        const backSample = sampleCourse(course, Math.max(0, at - 1.15));
+        const foreSample = sampleCourse(course, at + 1.15);
+        const backOffset = branchCenter(backSample, side);
+        const foreOffset = branchCenter(foreSample, side);
+        const back = {
+          x: backSample.x + backSample.right.x * backOffset,
+          y: backSample.y,
+          z: backSample.z + backSample.right.z * backOffset,
+        };
+        const fore = {
+          x: foreSample.x + foreSample.right.x * foreOffset,
+          y: foreSample.y,
+          z: foreSample.z + foreSample.right.z * foreOffset,
+        };
         const dash = mark(0.16, 0.03, 2.3, white);
-        const dashAt = (sample.fork?.median || 0) > 0.2
-          ? carriageCenter(sample, side)
-          : side * sample.halfWidth * 0.32;
-        place(root, dash, sample, dashAt, 0.03, sample);
+        dash.position.set(
+          (back.x + fore.x) * 0.5,
+          (back.y + fore.y) * 0.5 + 0.03,
+          (back.z + fore.z) * 0.5,
+        );
+        applyFrame(dash, frameFromTangent(fore.x - back.x, fore.y - back.y, fore.z - back.z));
+        root.add(dash);
       }
     }
 

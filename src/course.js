@@ -154,6 +154,18 @@ export function forkAt(course, s) {
   return { index, median: split * peak, split };
 }
 
+// The white dash on one branch. A single road keeps the lane mark at 0.32 of
+// the half-width. Once the grass opens, the dash is the middle of that
+// carriageway, which is not the shared centerline.
+export function branchCenter(sample, side) {
+  const sign = side >= 0 ? 1 : -1;
+  const half = sample?.halfWidth || 0;
+  const median = sample?.fork?.median || 0;
+  const split = sample?.fork?.split || 0;
+  if (median < 0.05 || split < 0.05) return sign * half * 0.32;
+  return sign * (median + half) * 0.5;
+}
+
 // Lane centers sit at ±0.36 of the half-width on one road. On a fork they
 // slide out to the middle of each carriageway as the grass opens.
 export function carriageCenter(sample, side) {
