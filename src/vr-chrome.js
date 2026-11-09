@@ -1,16 +1,32 @@
-// The picture is locked to the road, or to the walk face. Halo draws a
-// window on the forward sphere only when its rectangle sits inside the
-// layout. Open panels stay inside that cap, at the sides, so the road
-// stays in the middle and the panels stay in the picture. Exit VR is
-// pulled onto the top right of the same cap. A hidden window stays hidden.
+// Halo keeps the HUD root at rotation 0 and raycasts those live meshes
+// after the frame. A yaw on the root draws the panels somewhere the click
+// does not hit. The layout coordinates are the sphere: a window center at
+// yaw/pitch sits in that direction around the head. Open panels are staged
+// there, a few degrees either side of the look, so they stay in the picture
+// and the ray hits the mesh that was drawn. A hidden window stays hidden.
+// Exit VR is pulled back on.
+
+import {
+  HUD_VR_DISTANCE_M,
+  HUD_VR_SURFACE_HEIGHT_M,
+  HUD_VR_SURFACE_WIDTH_M,
+} from "../node_modules/@rb/halo/src/hud-placement-policy.js";
 
 export const VR_LAYOUT_W = 2200;
 export const VR_LAYOUT_H = 1200;
 
-const PAD = 32;
 const GAP = 28;
+const COLUMN = 0.16;
 const LEFT_KEYS = ["race", "help", "hotbar"];
-const RIGHT_KEYS = ["race-chat", "settings"];
+const RIGHT_KEYS = ["xr", "race-chat", "settings"];
+
+function yawSpan() {
+  return 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / Math.max(0.001, HUD_VR_DISTANCE_M));
+}
+
+function pitchSpan() {
+  return 2 * Math.atan((HUD_VR_SURFACE_HEIGHT_M * 0.5) / Math.max(0.001, HUD_VR_DISTANCE_M));
+}
 
 function isOpen(win) {
   return !!win && Number(win.y) >= -1000;
@@ -20,43 +36,68 @@ export function stageVrPanels({
   windows,
   layoutW = VR_LAYOUT_W,
   layoutH = VR_LAYOUT_H,
+  eyeYaw = 0,
+  eyePitch = 0,
 } = {}) {
   if (!windows) return;
   const width = Math.max(1, Number(layoutW) || VR_LAYOUT_W);
   const height = Math.max(1, Number(layoutH) || VR_LAYOUT_H);
+  const lookYaw = Number(eyeYaw) || 0;
+  const lookPitch = Number(eyePitch) || 0;
   const placed = new Set();
 
-  function place(key, x, y, force) {
-    const win = windows[key];
-    if (!win || (!force && !isOpen(win))) return y;
-    const w = Math.max(1, Number(win.w) || 1);
-    const h = Math.max(1, Number(win.h) || 1);
-    const maxX = Math.max(PAD, width - w - PAD);
-    const maxY = Math.max(PAD, height - h - PAD);
-    win.x = Math.min(maxX, Math.max(PAD, Math.round(x)));
-    win.y = Math.min(maxY, Math.max(PAD, Math.round(y)));
-    placed.add(key);
-    return win.y + h + GAP;
+  function xFor(yaw, w) {
+    const cx = width * (0.5 + yaw / yawSpan());
+    return Math.round(cx - w / 2);
   }
 
-  const xr = windows.xr;
-  const xrW = Math.max(1, Number(xr?.w) || 300);
-  const xrH = Math.max(1, Number(xr?.h) || 136);
-  place("xr", width - xrW - PAD, PAD, true);
-
-  let leftY = PAD;
-  for (const key of LEFT_KEYS) leftY = place(key, PAD, leftY, false);
-
-  let rightY = PAD + xrH + GAP;
-  for (const key of RIGHT_KEYS) {
-    const w = Math.max(1, Number(windows[key]?.w) || 1);
-    rightY = place(key, width - w - PAD, rightY, false);
+  function yFor(pitch, h) {
+    const cy = height * (0.5 - pitch / pitchSpan());
+    return Math.round(cy - h / 2);
   }
 
+  function stack(keys, yaw, forceKey) {
+    const items = [];
+    for (const key of keys) {
+      const win = windows[key];
+      if (!win || (key !== forceKey && !isOpen(win))) continue;
+      items.push({ key, win });
+    }
+    if (!items.length) return 0;
+    let total = 0;
+    for (const item of items) total += Math.max(1, Number(item.win.h) || 1);
+    total += GAP * (items.length - 1);
+    let y = yFor(lookPitch, total);
+    let bottom = y;
+    for (const item of items) {
+      const w = Math.max(1, Number(item.win.w) || 1);
+      const h = Math.max(1, Number(item.win.h) || 1);
+      item.win.x = xFor(yaw, w);
+      item.win.y = y < -900 ? -900 : y;
+      y = item.win.y + h + GAP;
+      bottom = y;
+      placed.add(item.key);
+    }
+    return bottom;
+  }
+
+  const leftBottom = stack(LEFT_KEYS, lookYaw + COLUMN, null);
+  const rightBottom = stack(RIGHT_KEYS, lookYaw - COLUMN, "xr");
+
+  let leftY = leftBottom || yFor(lookPitch, 0);
+  let rightY = rightBottom || yFor(lookPitch, 0);
   for (const key of Object.keys(windows)) {
     if (placed.has(key) || !isOpen(windows[key])) continue;
-    const w = Math.max(1, Number(windows[key].w) || 1);
-    if (leftY <= rightY) leftY = place(key, PAD, leftY, false);
-    else rightY = place(key, width - w - PAD, rightY, false);
+    const win = windows[key];
+    const w = Math.max(1, Number(win.w) || 1);
+    const h = Math.max(1, Number(win.h) || 1);
+    const yaw = leftY <= rightY ? lookYaw + COLUMN : lookYaw - COLUMN;
+    win.x = xFor(yaw, w);
+    win.y = (leftY <= rightY ? leftY : rightY);
+    if (win.y < -900) win.y = -900;
+    const next = win.y + h + GAP;
+    if (leftY <= rightY) leftY = next;
+    else rightY = next;
+    placed.add(key);
   }
 }

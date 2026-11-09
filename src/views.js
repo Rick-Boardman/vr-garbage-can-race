@@ -24,7 +24,6 @@ const _qPitch = new THREE.Quaternion();
 const _qYaw = new THREE.Quaternion();
 const _qCancel = new THREE.Quaternion();
 const _headQ = new THREE.Quaternion();
-const _hudQ = new THREE.Quaternion();
 const _poseV = new THREE.Vector3();
 const _desired = new THREE.Vector3();
 const _actual = new THREE.Vector3();
@@ -60,11 +59,19 @@ export function vrFootAnchor(origin, right, forward, seatEye) {
 }
 
 // Yaw of the headset pose in the reference space. Identity looks down -z.
-// Check: quaternion from Euler YXZ yaw π/2 → π/2.
-export function referenceYaw(x, y, z, w) {
+// Check: quaternion from Euler YXZ yaw π/2 → π/2. Pitch is the X component.
+export function referencePose(x, y, z, w) {
   _quat.set(Number(x) || 0, Number(y) || 0, Number(z) || 0, Number.isFinite(Number(w)) ? Number(w) : 1);
   _yawEuler.setFromQuaternion(_quat, "YXZ");
-  return _yawEuler.y;
+  return { yaw: _yawEuler.y, pitch: _yawEuler.x };
+}
+
+export function referenceYaw(x, y, z, w) {
+  return referencePose(x, y, z, w).yaw;
+}
+
+export function referencePitch(x, y, z, w) {
+  return referencePose(x, y, z, w).pitch;
 }
 
 // The pose is parented onto the rig, so its yaw would add to the road heading.
@@ -81,12 +88,6 @@ export function vrPresentRig(anchor, heading, poseYaw, viewPitch, posePosition) 
   _qYaw.setFromAxisAngle(_axisY, yaw);
   _qCancel.setFromAxisAngle(_axisY, -yaw);
   _headQ.copy(_qYaw).multiply(_qPitch).multiply(_qCancel);
-  // The HUD sphere has to face the locked look. Root yaw 0 faces
-  // heading - poseYaw, so a rider turned around in the room looks down
-  // the hill and the panels sit behind the picture. Ry(poseYaw) * Rx(pitch)
-  // puts the cap on that look. Halo caches the root matrix before it
-  // zeros the rotation, and the laser multiplies that cache.
-  _hudQ.copy(_qYaw).multiply(_qPitch);
 
   _poseV.set(Number(posePosition?.x) || 0, Number(posePosition?.y) || 0, Number(posePosition?.z) || 0);
   _desired.copy(_poseV).applyQuaternion(_qPitch);
@@ -99,10 +100,6 @@ export function vrPresentRig(anchor, heading, poseYaw, viewPitch, posePosition) 
     headY: _headQ.y,
     headZ: _headQ.z,
     headW: _headQ.w,
-    hudX: _hudQ.x,
-    hudY: _hudQ.y,
-    hudZ: _hudQ.z,
-    hudW: _hudQ.w,
     x: anchor.x + _desired.x - _actual.x,
     y: anchor.y + _desired.y - _actual.y,
     z: anchor.z + _desired.z - _actual.z,

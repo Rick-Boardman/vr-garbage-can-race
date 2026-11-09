@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import * as THREE from "three";
 
 import {
   HUD_VR_DISTANCE_M,
@@ -30,72 +29,61 @@ function pitchSpan() {
   return 2 * Math.atan((HUD_VR_SURFACE_HEIGHT_M * 0.5) / HUD_VR_DISTANCE_M);
 }
 
-function onCap(win) {
-  assert.ok(win.y >= -1000, `parked y ${win.y}`);
-  assert.ok(win.x >= 0 && win.x + win.w <= VR_LAYOUT_W, `x ${win.x} w ${win.w}`);
-  assert.ok(win.y + win.h <= VR_LAYOUT_H, `y ${win.y} h ${win.h}`);
-  const yaw = ((win.x + win.w / 2) / VR_LAYOUT_W - 0.5) * yawSpan();
-  const pitch = (0.5 - (win.y + win.h / 2) / VR_LAYOUT_H) * pitchSpan();
-  assert.ok(Math.abs(yaw) < yawSpan() * 0.5, `yaw ${yaw}`);
-  assert.ok(Math.abs(pitch) < pitchSpan() * 0.5, `pitch ${pitch}`);
+function angDiff(a, b) {
+  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
+}
+
+function centerYaw(win) {
+  return ((win.x + win.w / 2) / VR_LAYOUT_W - 0.5) * yawSpan();
+}
+
+function centerPitch(win) {
+  return (0.5 - (win.y + win.h / 2) / VR_LAYOUT_H) * pitchSpan();
 }
 
 function overlaps(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-function coversRoad(win) {
-  const left = VR_LAYOUT_W * 0.34;
-  const right = VR_LAYOUT_W * 0.66;
-  return win.x < right && win.x + win.w > left;
-}
-
-test("open panels sit on the forward sphere and the road stays in the middle", () => {
-  const hud = windows();
-  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
-
-  assert.equal(hud.settings.y, -2000);
-  assert.equal(hud.debug.y, -2000);
-  assert.equal(hud.status.y, -2000);
-
-  for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) onCap(hud[key]);
-  for (const key of ["race", "help", "race-chat", "hotbar"]) {
-    assert.equal(coversRoad(hud[key]), false, `${key} covers the road`);
-    assert.equal(overlaps(hud.xr, hud[key]), false, `${key} covers Exit VR`);
+test("open panels sit in front of the look, including when the room yaw is large", () => {
+  for (const eyeYaw of [0, Math.PI, -1.4, 2.2]) {
+    for (const eyePitch of [0, -0.32, 0.4]) {
+      const hud = windows();
+      stageVrPanels({
+        windows: hud,
+        layoutW: VR_LAYOUT_W,
+        layoutH: VR_LAYOUT_H,
+        eyeYaw,
+        eyePitch,
+      });
+      assert.equal(hud.settings.y, -2000);
+      assert.equal(hud.debug.y, -2000);
+      assert.equal(hud.status.y, -2000);
+      for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) {
+        const yaw = angDiff(centerYaw(hud[key]), eyeYaw);
+        const pitch = centerPitch(hud[key]) - eyePitch;
+        assert.ok(Math.abs(yaw) < 0.45, `${key} yaw ${yaw} at eye ${eyeYaw}`);
+        assert.ok(Math.abs(pitch) < 0.55, `${key} pitch ${pitch} at eye ${eyePitch}`);
+        assert.ok(hud[key].y >= -900, `${key} was parked`);
+      }
+      for (const key of ["race", "help", "race-chat", "hotbar"]) {
+        assert.equal(overlaps(hud.xr, hud[key]), false, `${key} covers Exit VR at ${eyeYaw}`);
+      }
+    }
   }
-  assert.ok(hud.xr.x > VR_LAYOUT_W * 0.5, "Exit VR is on the right");
-  assert.ok(hud.xr.y < VR_LAYOUT_H * 0.25, `Exit VR y ${hud.xr.y}`);
 });
 
-test("an opened settings panel stays on the sphere and off Exit VR", () => {
+test("an opened settings panel stays by the look and off Exit VR", () => {
   const hud = windows();
   hud.settings.y = 40;
-  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
-  onCap(hud.settings);
-  assert.equal(coversRoad(hud.settings), false);
+  stageVrPanels({
+    windows: hud,
+    layoutW: VR_LAYOUT_W,
+    layoutH: VR_LAYOUT_H,
+    eyeYaw: 1.7,
+    eyePitch: -0.2,
+  });
+  assert.ok(Math.abs(angDiff(centerYaw(hud.settings), 1.7)) < 0.45);
   assert.equal(overlaps(hud.xr, hud.settings), false);
-});
-
-test("a yaw on the HUD root is the transform the laser multiplies", () => {
-  const root = new THREE.Group();
-  const plane = new THREE.Group();
-  const mesh = new THREE.Mesh();
-  root.add(plane);
-  plane.add(mesh);
-  root.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), 1.2);
-  root.quaternion.multiply(
-    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.32),
-  );
-  mesh.position.set(1.2, -0.4, -4);
-  mesh.quaternion.setFromEuler(new THREE.Euler(0.1, -0.4, 0.2));
-  root.updateMatrixWorld(true);
-  const drawn = mesh.matrixWorld.clone();
-  const cachedRoot = root.matrixWorld.clone();
-  mesh.updateMatrix();
-  root.rotation.set(0, 0, 0);
-  root.updateMatrixWorld(true);
-  const picked = new THREE.Matrix4().multiplyMatrices(cachedRoot, mesh.matrix);
-  const drawnPos = new THREE.Vector3().setFromMatrixPosition(drawn);
-  const pickedPos = new THREE.Vector3().setFromMatrixPosition(picked);
-  assert.ok(drawnPos.distanceTo(pickedPos) < 1e-4, `laser missed by ${drawnPos.distanceTo(pickedPos)}`);
+  assert.ok(hud.settings.y >= -900);
 });

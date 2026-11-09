@@ -39,7 +39,7 @@ import { createProps } from "./props.js";
 import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
-import { VIEWS, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
+import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
 import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
 import {
   footDragStick,
@@ -105,6 +105,8 @@ let viewIndex = viewIndexFor(viewParam);
 let vrSeatEye = null;
 let vrChromeOn = false;
 let vrDesktop = null;
+let vrEyeYaw = 0;
+let vrEyePitch = 0;
 const stickLocks = new WeakMap();
 let head = null;
 let lastHeading = null;
@@ -496,7 +498,7 @@ hudSystem.setHelpOverrideLines([
   "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
   "The right stick turns the view and the way you walk. X or A jumps.",
-  "The panels stay on the sphere in front of that view. Exit VR is the top right panel.",
+  "The panels sit on the sphere in front of the view. Point at one and pull the trigger.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -574,13 +576,14 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Halo maps the layout rectangle onto the forward sphere. Stage into
-  // that rectangle. hud.layoutW is still the desktop size on the enter
-  // frame, and a window placed past the cap is off the sphere.
+  // Root stays at rotation 0. Halo raycasts the live meshes after it
+  // forces that, so the windows themselves move to the look.
   stageVrPanels({
     windows: hudSystem?.hud?.ui?.windows,
     layoutW: VR_LAYOUT_W,
     layoutH: VR_LAYOUT_H,
+    eyeYaw: vrEyeYaw,
+    eyePitch: vrEyePitch,
   });
 }
 function captureVrDesktop() {
@@ -865,19 +868,20 @@ function placeWorld(presenting) {
     const xrCam = renderer?.xr?.getCamera?.();
     const poseQ = xrCam?.quaternion;
     const poseP = xrCam?.position;
-    const placed = vrPresentRig(
-      eye,
-      heading,
-      poseQ ? referenceYaw(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0,
-      pitch,
-      poseP,
-    );
+    const poseYaw = poseQ ? referenceYaw(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0;
+    const posePitch = poseQ ? referencePitch(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0;
+    const placed = vrPresentRig(eye, heading, poseYaw, pitch, poseP);
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
-    // Faces the locked look. Halo copies this matrix for the laser, then
-    // zeros the root. The click uses the copy, so it hits the drawn panel.
-    if (hudSystem?.hud?.root) {
-      hudSystem.hud.root.quaternion.set(placed.hudX, placed.hudY, placed.hudZ, placed.hudW);
-    }
+    // Halo draws this root, then sets its rotation to 0 and raycasts the
+    // live meshes. A quaternion here is gone before the click, so the ray
+    // lands on a panel that is no longer there. Leave the root at 0 and
+    // stage the windows at the look instead.
+    if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
+    // Halo's sphere yaw is positive toward +X. The headset's positive yaw
+    // looks the other way, toward -X, so the window center uses the opposite.
+    vrEyeYaw = -poseYaw;
+    vrEyePitch = pitch + posePitch;
+    holdVrPanels();
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);

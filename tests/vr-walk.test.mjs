@@ -14,7 +14,7 @@ import {
   vrJumpDown,
   vrStickPair,
 } from "../src/input.js";
-import { VIEWS, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
+import { VIEWS, referencePitch, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
   const forward = { x: 0, y: 0, z: -1 };
@@ -236,9 +236,8 @@ test("a headset turned around in the room still looks down the road", () => {
 
   const expected = new THREE.Vector3(0, 0, -1);
   const hud = new THREE.Group();
-  const hudFwd = new THREE.Vector3();
-  const lockedFwd = new THREE.Vector3();
   const hudQuat = new THREE.Quaternion();
+  const panelDir = new THREE.Vector3();
   pitchNode.add(hud);
   let eye = null;
   for (const turned of [0, Math.PI, -1.4, 2.2]) {
@@ -279,25 +278,24 @@ test("a headset turned around in the room still looks down the road", () => {
         else assert.ok(pos.distanceTo(eye) < 1e-4, `eye moved ${pos.distanceTo(eye)} at yaw ${turned}`);
       }
 
-      // The sphere faces the locked look for every room yaw, including a
-      // rider turned around. Extra head pitch looks away from that picture.
-      hud.quaternion.set(placed.hudX, placed.hudY, placed.hudZ, placed.hudW);
+      // The HUD root stays at rotation 0. Halo raycasts those live meshes
+      // after the frame. Its sphere yaw is positive toward +X, opposite the
+      // headset yaw, so a window at -poseYaw is what the rider is looking at.
+      hud.rotation.set(0, 0, 0);
       player.updateMatrixWorld(true);
-      hud.getWorldQuaternion(hudQuat);
-      hudFwd.set(0, 0, -1).applyQuaternion(hudQuat);
-      lockedFwd.set(0, 0, -1).applyQuaternion(
-        new THREE.Quaternion()
-          .setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading)
-          .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), viewPitch)),
+      const eyePitch = viewPitch + referencePitch(pose.x, pose.y, pose.z, pose.w);
+      const layoutYaw = -py;
+      panelDir.set(
+        Math.sin(layoutYaw) * Math.cos(eyePitch),
+        Math.sin(eyePitch),
+        -Math.cos(layoutYaw) * Math.cos(eyePitch),
       );
-      const cap = hudFwd.dot(lockedFwd);
-      assert.ok(cap > 0.999, `sphere left the picture ${cap} at yaw ${turned}`);
-      if (posePitch === 0) {
-        const camDir = new THREE.Vector3();
-        cam.getWorldDirection(camDir);
-        const aimed = hudFwd.dot(camDir);
-        assert.ok(aimed > 0.999, `sphere missed the eyes ${aimed} at yaw ${turned}`);
-      }
+      hud.getWorldQuaternion(hudQuat);
+      panelDir.applyQuaternion(hudQuat).normalize();
+      const camDir = new THREE.Vector3();
+      cam.getWorldDirection(camDir);
+      const aimed = camDir.dot(panelDir);
+      assert.ok(aimed > 0.999, `panel left the eyes ${aimed} at yaw ${turned} pitch ${posePitch}`);
     }
   }
   assert.ok(eye.y < anchor.y + posePos.y, "the downward pitch does not lift the eye into the hill");
