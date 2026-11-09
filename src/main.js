@@ -40,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { stageVrPanels, VR_LAYOUT_H } from "./vr-chrome.js";
+import { stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -53,9 +53,9 @@ import {
   onFootJump,
   onFootSteer,
   selectRideInput,
+  stickFromSources,
   tiltAxes,
   vrJumpDown,
-  vrStickPair,
 } from "./input.js";
 
 const BEST_KEY = "garbage-can-race-best";
@@ -234,24 +234,45 @@ function readHands(controllers, camera) {
   });
 }
 
-function readGamepadStick(session, handedness) {
-  const sources = session?.inputSources;
-  if (!sources) return null;
-  let gamepad = null;
-  for (const source of sources) {
-    if (source?.handedness === handedness && source.gamepad?.axes?.length >= 2) {
-      gamepad = source.gamepad;
-      break;
-    }
-  }
-  if (!gamepad) return null;
-  const pair = vrStickPair(gamepad.axes, stickLocks.get(gamepad));
-  if (!pair) return null;
-  if (pair.lock) stickLocks.set(gamepad, pair.index);
-  return {
-    x: gamepad.axes[pair.index] || 0,
-    y: gamepad.axes[pair.index + 1] || 0,
+function xrInputSources(session) {
+  const sources = [];
+  const seen = new Set();
+  const push = (source) => {
+    if (!source || seen.has(source)) return;
+    seen.add(source);
+    sources.push(source);
   };
+  const listed = session?.inputSources;
+  if (listed) {
+    for (const source of listed) push(source);
+  }
+  for (const ray of [controllers?.ray0, controllers?.ray1]) {
+    push(ray?.userData?.inputSource);
+  }
+  return sources;
+}
+
+function poseXFor(sources) {
+  const frame = renderer?.xr?.getFrame?.();
+  const space = renderer?.xr?.getReferenceSpace?.();
+  if (!frame || !space) return null;
+  const xs = [];
+  for (const source of sources) {
+    const target = source?.gripSpace || source?.targetRaySpace;
+    if (!target) {
+      xs.push(null);
+      continue;
+    }
+    let pose = null;
+    try {
+      pose = frame.getPose(target, space);
+    } catch {
+      pose = null;
+    }
+    const x = Number(pose?.transform?.position?.x);
+    xs.push(Number.isFinite(x) ? x : null);
+  }
+  return xs;
 }
 
 function onOrientation(event) {
@@ -377,6 +398,7 @@ const boot = createSceneHudBootstrap({
     uiPreset: "minimal",
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
+    vrLayoutW: VR_LAYOUT_W,
     vrLayoutH: VR_LAYOUT_H,
     onHotbarSlot({ index }) {
       if (index === HOTBAR.camera) cycleView();
@@ -474,6 +496,7 @@ hudSystem.setHelpOverrideLines([
   "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
   "The right stick turns the view and the way you walk. X or A jumps.",
+  "The panels stay on the sphere in front of that view. Exit VR is the top right panel.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -551,13 +574,13 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Halo's grid fills the picture, and a yaw on the HUD root draws panels
-  // the laser cannot hit. Keep the root at yaw 0 and restage around that.
-  const hud = hudSystem?.hud;
+  // Halo maps the layout rectangle onto the forward sphere. Stage into
+  // that rectangle. hud.layoutW is still the desktop size on the enter
+  // frame, and a window placed past the cap is off the sphere.
   stageVrPanels({
-    windows: hud?.ui?.windows,
-    layoutW: hud?.layoutW,
-    layoutH: hud?.layoutH,
+    windows: hudSystem?.hud?.ui?.windows,
+    layoutW: VR_LAYOUT_W,
+    layoutH: VR_LAYOUT_H,
   });
 }
 function captureVrDesktop() {
@@ -850,9 +873,11 @@ function placeWorld(presenting) {
       poseP,
     );
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
-    // Halo zeros this after the frame and aims the laser there. A yaw here
-    // draws the panels in the face and the Exit VR click misses.
-    if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
+    // Faces the locked look. Halo copies this matrix for the laser, then
+    // zeros the root. The click uses the copy, so it hits the drawn panel.
+    if (hudSystem?.hud?.root) {
+      hudSystem.hud.root.quaternion.set(placed.hudX, placed.hudY, placed.hudZ, placed.hudW);
+    }
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);
@@ -939,9 +964,10 @@ function sampleInput(presenting) {
     keys.strafe = 0;
   }
   if (finger && keys.throttle === 0) keys.throttle = finger.throttle;
-  const session = presenting && ride.eject ? renderer.xr.getSession?.() : null;
-  const leftStick = session ? readGamepadStick(session, "left") : null;
-  const rightStick = session ? readGamepadStick(session, "right") : null;
+  const sources = presenting && ride.eject ? xrInputSources(renderer.xr.getSession?.()) : null;
+  const poseX = sources ? poseXFor(sources) : null;
+  const leftStick = sources ? stickFromSources(sources, "left", poseX, stickLocks) : null;
+  const rightStick = sources ? stickFromSources(sources, "right", poseX, stickLocks) : null;
   const vrStick = leftStick ? inputFromVrStick(leftStick.x, leftStick.y) : null;
   const selected = selectRideInput({
     presenting,
@@ -954,7 +980,7 @@ function sampleInput(presenting) {
     preferTilt: !finger && isCoarse() && !!latestTilt,
   });
   selected.jump = onFootJump(navigation.keysDown);
-  if (presenting && ride.eject && vrJumpDown(session?.inputSources)) {
+  if (presenting && ride.eject && vrJumpDown(sources)) {
     selected.jump = true;
   }
   selected.strafe = footStrafe(selected.source, !!ride.eject, keys.strafe, selected.strafe);

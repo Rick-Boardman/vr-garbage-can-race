@@ -88,16 +88,37 @@ export function inputFromVrStick(x, y) {
   };
 }
 
+function stickMag(axes, index) {
+  return Math.hypot(Number(axes[index]) || 0, Number(axes[index + 1]) || 0);
+}
+
 // Quest may put the thumbstick on axes 0,1 or 2,3. The first decisive
-// push locks the pair. Until then, a quiet pad stays on 0,1.
+// push locks the pair. A locked pair that has gone quiet yields to a
+// decisive push on the other pair, so a stale lock cannot hide the stick.
 export function vrStickPair(axes, locked = null) {
   if (!axes || axes.length < 2) return null;
-  if (locked === 0 || locked === 2) return { index: locked, lock: false };
   const choices = axes.length >= 4 ? [0, 2] : [0];
+  if ((locked === 0 || locked === 2) && choices.includes(locked)) {
+    const lockedMag = stickMag(axes, locked);
+    let other = null;
+    let otherMag = -1;
+    for (const index of choices) {
+      if (index === locked) continue;
+      const mag = stickMag(axes, index);
+      if (mag > otherMag) {
+        otherMag = mag;
+        other = index;
+      }
+    }
+    if (other != null && lockedMag < 0.15 && otherMag >= 0.35) {
+      return { index: other, lock: true };
+    }
+    return { index: locked, lock: false };
+  }
   let best = 0;
   let bestMag = -1;
   for (const index of choices) {
-    const mag = Math.hypot(Number(axes[index]) || 0, Number(axes[index + 1]) || 0);
+    const mag = stickMag(axes, index);
     if (mag > bestMag) {
       bestMag = mag;
       best = index;
@@ -107,6 +128,93 @@ export function vrStickPair(axes, locked = null) {
   if (bestMag >= 0.35) return { index: best, lock: true };
   if (bestMag >= 0.15) return { index: best, lock: false };
   return { index: 0, lock: false };
+}
+
+function handInId(id, handedness) {
+  const text = String(id || "").toLowerCase();
+  if (!text) return false;
+  if (handedness === "left") return /\bleft\b/.test(text);
+  if (handedness === "right") return /\bright\b/.test(text);
+  return false;
+}
+
+function poseHands(sources, poseX) {
+  if (!poseX) return null;
+  const posed = [];
+  for (let i = 0; i < sources.length; i += 1) {
+    const source = sources[i];
+    if (String(source?.handedness || "")) continue;
+    if (!source?.gamepad?.axes || source.gamepad.axes.length < 2) continue;
+    const x = Number(poseX[i]);
+    if (!Number.isFinite(x)) continue;
+    posed.push({ source, x });
+  }
+  if (posed.length < 2) return null;
+  posed.sort((a, b) => a.x - b.x);
+  const left = posed[0];
+  const right = posed[posed.length - 1];
+  if (left.source.gamepad === right.source.gamepad) return null;
+  if (!(right.x - left.x >= 0.06)) return null;
+  return { left: left.source, right: right.source };
+}
+
+function readLockedStick(gamepad, locks) {
+  const pair = vrStickPair(gamepad.axes, locks?.get?.(gamepad) ?? null);
+  if (!pair) return null;
+  if (pair.lock) locks?.set?.(gamepad, pair.index);
+  const x = Number(gamepad.axes[pair.index]);
+  const y = Number(gamepad.axes[pair.index + 1]);
+  return {
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+  };
+}
+
+function loudestStick(gamepads, locks) {
+  let best = null;
+  let bestMag = -1;
+  const seen = new Set();
+  for (const gamepad of gamepads) {
+    if (!gamepad || seen.has(gamepad)) continue;
+    seen.add(gamepad);
+    const reading = readLockedStick(gamepad, locks);
+    if (!reading) continue;
+    const mag = Math.hypot(reading.x, reading.y);
+    if (mag > bestMag) {
+      bestMag = mag;
+      best = reading;
+    }
+  }
+  return best ? { reading: best, mag: bestMag } : null;
+}
+
+// Handedness, then the gamepad id, then pose X when the runtime leaves
+// the hand blank. Two pads for one hand: the one actually deflected wins,
+// so a quiet duplicate cannot hide the stick.
+export function stickFromSources(sources, handedness, poseX = null, locks = null) {
+  const list = Array.from(sources || []);
+  if (handedness !== "left" && handedness !== "right") return null;
+  const pads = (pred) => {
+    const found = [];
+    for (const source of list) {
+      if (!pred(source)) continue;
+      const gamepad = source?.gamepad;
+      if (!gamepad?.axes || gamepad.axes.length < 2) continue;
+      found.push(gamepad);
+    }
+    return found;
+  };
+  let best = loudestStick(pads((source) => source?.handedness === handedness), locks);
+  if (best && best.mag >= 0.15) return best.reading;
+  const byId = loudestStick(pads((source) => handInId(source?.gamepad?.id, handedness)), locks);
+  if (byId && byId.mag > (best?.mag ?? -1)) best = byId;
+  if (best && best.mag >= 0.15) return best.reading;
+  const inferred = poseHands(list, poseX);
+  if (inferred?.[handedness]?.gamepad) {
+    const fromPose = loudestStick([inferred[handedness].gamepad], locks);
+    if (fromPose && fromPose.mag > (best?.mag ?? -1)) best = fromPose;
+  }
+  return best ? best.reading : null;
 }
 
 // A or X. The trigger is the HUD pointer, so button 0 does not jump.
