@@ -667,10 +667,7 @@ function footStillBlocks(car, foot) {
 // Stop a car short of an on-foot rider. A bumper stop, not a wreck.
 // The can in the rider's hand is not in this list. Alongside contact is left
 // to the rider, who is pushed out of the footprint in the drive step.
-export function holdCarsForFoot(cars, feet, dt = 0) {
-  const bodies = (Array.isArray(feet) ? feet : [feet]).filter((foot) => (
-    foot && foot.onFoot && Number.isFinite(foot.s)
-  ));
+function holdCars(cars, bodies, dt = 0) {
   let held = 0;
   const step = Math.max(0, dt || 0);
   for (const car of cars || []) {
@@ -706,6 +703,75 @@ export function holdCarsForFoot(cars, feet, dt = 0) {
     car.footHold = false;
   }
   return held;
+}
+
+// Stop a car short of an on-foot rider. A bumper stop, not a wreck.
+// The can in the rider's hand is not in this list. Alongside contact is left
+// to the rider, who is pushed out of the footprint in the drive step.
+export function holdCarsForFoot(cars, feet, dt = 0) {
+  const bodies = (Array.isArray(feet) ? feet : [feet]).filter((foot) => (
+    foot && foot.onFoot && Number.isFinite(foot.s)
+  ));
+  return holdCars(cars, bodies, dt);
+}
+
+// Waiting cans are not a crash. A car in their lane stops at the bumper.
+// This does not clear a hold set for someone on foot.
+export function holdCarsForLine(cars, riders, dt = 0) {
+  const bodies = (Array.isArray(riders) ? riders : [riders]).filter((rider) => (
+    rider && Number.isFinite(rider.s)
+  ));
+  if (!bodies.length) return 0;
+  let held = 0;
+  const step = Math.max(0, dt || 0);
+  for (const car of cars || []) {
+    if (!car) continue;
+    const moved = (car.wreck ? (car.wreck.along || 0) : (car.speed || 0)) * step;
+    const prevS = Number.isFinite(car.prevS) ? car.prevS : (car.s || 0) - moved;
+    let stop = null;
+    for (const rider of bodies) {
+      const meet = carMeetsFoot(car, rider, prevS);
+      if (!meet) continue;
+      if (!stop || (meet.stopS - stop.stopS) * meet.dir < 0) stop = meet;
+    }
+    if (stop) {
+      if ((car.s - stop.stopS) * stop.dir > 0) car.s = stop.stopS;
+      car.speed = 0;
+      if (car.wreck) car.wreck.along = 0;
+      car.footHold = true;
+      car.lineHold = true;
+      held += 1;
+      continue;
+    }
+    if (car.lineHold && bodies.some((rider) => footStillBlocks(car, rider))) {
+      car.speed = 0;
+      if (car.wreck) car.wreck.along = 0;
+      car.footHold = true;
+      held += 1;
+      continue;
+    }
+    car.lineHold = false;
+  }
+  return held;
+}
+
+export function packTraffic(cars) {
+  return (cars || []).filter((car) => car && !car.hidden).map((car) => {
+    const dir = Math.sign(car.speed) || Math.sign(car.cruise) || Math.sign(car.dir) || 1;
+    const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
+    return {
+      id: car.id,
+      s: round(car.s),
+      offset: round(car.offset),
+      speed: round(car.speed),
+      roll: round(car.roll),
+      dir,
+      wreck: car.wreck ? 1 : 0,
+      spin: round(car.wreck?.spin),
+      hop: round(car.wreck?.hop),
+      shift: round(car.wreck?.shift),
+    };
+  });
 }
 
 export function createTown(THREE, scene, materials, props) {
@@ -1821,8 +1887,43 @@ export function createTown(THREE, scene, materials, props) {
     }
 
     ensureCars(course);
+    const follow = Array.isArray(player?.cars) ? player.cars : null;
+    if (follow) {
+      const byId = new Map();
+      for (const row of follow) if (row?.id) byId.set(row.id, row);
+      for (const car of cars) {
+        const row = byId.get(car.id);
+        if (!row) {
+          car.hidden = true;
+          if (car.mesh) car.mesh.visible = false;
+          continue;
+        }
+        car.hidden = false;
+        if (car.mesh) car.mesh.visible = true;
+        car.s = Number(row.s) || 0;
+        car.offset = Number(row.offset) || 0;
+        car.speed = Number(row.speed) || 0;
+        car.roll = Number(row.roll) || 0;
+        car.dir = Math.sign(row.dir) || Math.sign(car.speed) || 1;
+        car.bias = 0;
+        car.swerving = false;
+        car.striking = false;
+        car.footHold = false;
+        car.lineHold = false;
+        if (row.wreck) {
+          car.wreck = {
+            spin: Number(row.spin) || 0,
+            hop: Number(row.hop) || 0,
+            shift: Number(row.shift) || 0,
+            along: Number(row.speed) || 0,
+          };
+        } else {
+          car.wreck = null;
+        }
+      }
+    }
     const rand = mulberry32(((course.seed + Math.floor(time * 10)) ^ 0x9e37) >>> 0);
-    for (const car of cars) {
+    if (!follow) for (const car of cars) {
       if (car.s < viewS - 45 || car.s > viewS + 190) recycleCar(car, viewS, rand, player?.speed || 0);
       car.prevS = car.s;
       if (car.wreck) {
@@ -1864,7 +1965,7 @@ export function createTown(THREE, scene, materials, props) {
       if (Math.abs(car.speed) > 0.2) car.roll += Math.abs(car.speed) * dt * 1.6;
       flashLights(car.mesh.userData.lights, time);
     }
-    for (const car of cars) recoverCruise(car, dt);
+    if (!follow) for (const car of cars) recoverCruise(car, dt);
     for (const chunk of chunks.values()) {
       for (const child of chunk.root.children) {
         flashLights(child.userData?.lights, time);
@@ -1875,15 +1976,15 @@ export function createTown(THREE, scene, materials, props) {
     for (const chunk of chunks.values()) {
       for (const actor of chunk.actors) roadUsers.push(actor);
     }
-    separateLane(cars, { mayCrash: vehicleMayHit });
-    for (const car of cars) {
+    if (!follow) separateLane(cars, { mayCrash: vehicleMayHit });
+    if (!follow) for (const car of cars) {
       if (!car.crash || car.wreck || car.kind === "bus") continue;
       const other = cars.find((item) => item.id === car.crash);
       if (other?.kind === "bus") continue;
       startVehicleWreck(car, other);
     }
     const carBlocks = parkedBlocks.slice();
-    for (const car of cars) {
+    if (!follow) for (const car of cars) {
       const sample = sampleCourse(course, Math.max(0, car.s));
       const routeSide = Math.sign(car.lane) || 1;
       let laneOffset = (sample.fork?.median || 0) > 0.05
@@ -1966,14 +2067,16 @@ export function createTown(THREE, scene, materials, props) {
       car.swerving = !!aim.swerving;
       car.striking = striking;
     }
-    collideSweptCars(cars, parkedBlocks);
+    if (!follow) collideSweptCars(cars, parkedBlocks);
     const feet = [];
     if (player?.onFoot && Number.isFinite(player.s)) feet.push(player);
     for (const extra of player?.feet || []) {
       if (extra?.onFoot && Number.isFinite(extra.s)) feet.push(extra);
     }
-    holdCarsForFoot(cars, feet, dt);
+    if (!follow) holdCarsForFoot(cars, feet, dt);
+    if (!follow && player?.line?.length) holdCarsForLine(cars, player.line, dt);
     for (const car of cars) {
+      if (car.hidden) continue;
       const sample = sampleCourse(course, Math.max(0, car.s));
       const offset = car.offset || 0;
       const halfL = car.halfL || 2.15;
@@ -1988,7 +2091,7 @@ export function createTown(THREE, scene, materials, props) {
         striking: !!car.striking,
       });
       const travel = Math.abs(car.speed) > 0.4 ? car.speed : (car.cruise ?? car.speed);
-      const dir = travel >= 0 ? 1 : -1;
+      const dir = Math.sign(car.dir) || (travel >= 0 ? 1 : -1);
       const frame = frameFromTangent(
         sample.forward.x * dir,
         sample.forward.y * dir,
@@ -2250,5 +2353,5 @@ export function createTown(THREE, scene, materials, props) {
     }
   }
 
-  return { update, clear, noteHits };
+  return { update, clear, noteHits, fleet: () => packTraffic(cars) };
 }

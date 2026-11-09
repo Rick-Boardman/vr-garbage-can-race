@@ -85,6 +85,7 @@ export function poseOf(ride) {
     canOffset: round2(ejected ? ejected.canOffset : ride?.offset),
     bodyS: round2(ejected ? ejected.bodyS : ride?.s),
     bodyOffset: round2(ejected ? ejected.bodyOffset : ride?.offset),
+    face: round2(ejected ? ejected.face || 0 : 0),
   };
 }
 
@@ -426,8 +427,16 @@ export function lerpPose(from, to, t) {
     canOffset: mix(from.canOffset, to.canOffset),
     bodyS: mix(from.bodyS, to.bodyS),
     bodyOffset: mix(from.bodyOffset, to.bodyOffset),
+    face: mixAngle(from.face, to.face, blend),
     ejected: !!to.ejected,
   };
+}
+
+function mixAngle(from, to, blend) {
+  const start = Number(from) || 0;
+  const end = Number(to) || 0;
+  const turn = Math.atan2(Math.sin(end - start), Math.cos(end - start));
+  return start + turn * blend;
 }
 
 export function createPartyClient({

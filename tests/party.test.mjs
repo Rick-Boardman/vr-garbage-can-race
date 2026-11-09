@@ -15,6 +15,7 @@ import {
   createPartyClient,
   easePose,
   holdAtLine,
+  lerpPose,
   playSite,
   poseContacts,
   poseOf,
@@ -84,6 +85,18 @@ test("poses round to centimeters and an ejected can reports the can", () => {
   assert.equal(ejected.canOffset, -1.2);
   assert.equal(ejected.bodyS, 5);
   assert.equal(ejected.s, 3);
+  assert.equal(ejected.face, 0);
+  const turned = poseOf({
+    s: 3,
+    eject: { face: Math.PI, bodyS: 3, bodyOffset: 0, canS: 3, canOffset: 0 },
+  });
+  assert.equal(turned.face, 3.14);
+  const blended = lerpPose(
+    { ejected: true, face: 3, s: 0, offset: 0 },
+    { ejected: true, face: -3, s: 0, offset: 0 },
+    0.25,
+  );
+  assert.ok(blended.face > 3 && blended.face < 3.2, `face took the long way ${blended.face}`);
 });
 
 test("easing follows the host pose and snaps when the cans are far apart", () => {

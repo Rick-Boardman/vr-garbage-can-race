@@ -1726,7 +1726,7 @@ function sendParty(step) {
       displayName: nameForSlot(slot, entry),
     });
   }
-  partyClient.sendSnapshot({ riders });
+  partyClient.sendSnapshot({ riders, cars: town.fleet() });
 }
 
 function noteFrame() {
@@ -1821,6 +1821,25 @@ function tickBody(dt) {
   if (partyMode === "host") {
     for (const entry of remoteRides.values()) rideS = Math.min(rideS, entry.state.s);
   }
+  if (held()) {
+    const stagger = gate === "countdown";
+    const line = [{
+      s: START_S,
+      offset: stagger ? lineOffset(mySlot) : (ride.offset || 0),
+      radius: 0.6,
+    }];
+    if (partyMode === "host") {
+      for (const [slot, entry] of remoteRides) {
+        line.push({
+          s: START_S,
+          offset: stagger ? lineOffset(slot) : (entry.state.offset || 0),
+          radius: 0.6,
+        });
+      }
+    }
+    body.line = line;
+  }
+  if (partyMode === "player" && Array.isArray(latestSnapshot?.cars)) body.cars = latestSnapshot.cars;
   const hazards = town.update(course, rideS, step, elapsed, body);
   ride.events.length = 0;
   const slices = Math.max(1, Math.ceil(step / 0.02));

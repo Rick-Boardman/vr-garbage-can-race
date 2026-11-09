@@ -36,6 +36,8 @@ import {
   clampBusBias,
   collideSweptCars,
   holdCarsForFoot,
+  holdCarsForLine,
+  packTraffic,
   releaseBus,
   roadPathOpen,
   separateLane,
@@ -1792,6 +1794,45 @@ test("on foot, cars stop for the rider and the rider does not walk through them"
   assert.equal(holdCarsForFoot([cruiser], [{ s: 10, offset: 0, radius: 0.5 }], 0.05), 0);
   assert.equal(cruiser.s, 8.2, "a mounted can was treated as a person");
   assert.equal(cruiser.speed, 12);
+
+  const waiting = { s: 36, offset: 0, radius: 0.6 };
+  const through = {
+    id: "through",
+    s: 33.4,
+    offset: 0,
+    halfL: 2.15,
+    halfW: 0.95,
+    speed: 10,
+    cruise: 10,
+    prevS: 32.9,
+  };
+  assert.equal(holdCarsForLine([through], [waiting], 0.05), 1);
+  assert.ok(through.s < 36 - 2.15 - 0.6, `hit the start line at ${through.s}`);
+  assert.equal(through.speed, 0);
+  assert.equal(through.wreck, undefined);
+  const wide = {
+    id: "wide",
+    s: 30,
+    offset: 4,
+    halfL: 2.15,
+    halfW: 0.95,
+    speed: 10,
+    cruise: 10,
+    prevS: 29.5,
+  };
+  assert.equal(holdCarsForLine([wide], [waiting], 0.05), 0);
+  assert.equal(wide.s, 30, "a car in another lane stopped for the line");
+  const packed = packTraffic([{
+    id: "traffic-0",
+    s: 12.345,
+    offset: -0.2,
+    speed: 4,
+    roll: 1,
+    cruise: 4,
+  }]);
+  assert.equal(packed[0].id, "traffic-0");
+  assert.equal(packed[0].s, 12.35);
+  assert.equal(packed[0].dir, 1);
 
   foot.offset = 4;
   into.prevS = into.s;

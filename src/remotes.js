@@ -1,4 +1,5 @@
 import { sampleCourse } from "./course.js";
+import { walkerForward } from "./drive.js";
 import { acceptedLook, lookKey } from "./looks.js";
 import { SLOT_LOOKS, lerpPose } from "./party.js";
 import { createRider } from "./rider.js";
@@ -94,7 +95,7 @@ function placeRider(rider, course, pose, elapsed) {
       canHop: pose.hop || 0,
       bodySample,
       bodyOffset: pose.bodyOffset || 0,
-      facing: { x: bodySample.forward.x, z: bodySample.forward.z },
+      facing: walkerForward(bodySample.forward, bodySample.right, pose.face || 0),
       showPerson: true,
       moving: Math.abs(pose.speed || 0) > 0.12,
     });
