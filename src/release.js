@@ -1,6 +1,6 @@
 // Last committed release. The settings panel shows these so a rider can
 // tell which build is running. Uncommitted work is still this commit.
 export const RELEASE = {
-  commit: "a934ba7",
+  commit: "deb8ec2",
   date: "8 Nov 2026",
 };
