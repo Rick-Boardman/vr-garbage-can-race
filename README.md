@@ -1,6 +1,6 @@
 # Garbage Can Race
 
-Work on the game continues in this repository. The sealed one-prompt example remains at [vr-garbage-can-race](https://github.com/Rick-Boardman/vr-garbage-can-race) commit `fa35c1f`.
+Work on the game continues in this repository. The sealed one-prompt example remains at [vr-garbage-can-race-sealed](https://github.com/Rick-Boardman/vr-garbage-can-race-sealed) commit `fa35c1f`.
 
 A person stands in a garbage can and rolls an endless hill through a low-poly town. Parked cars, moving cars, people, potholes, and oil slicks get in the way. The road runs through downtown blocks, house rows, a market street, pastures, forest, and the shore, at dawn, day, dusk, or night.
 
