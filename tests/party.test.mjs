@@ -13,6 +13,7 @@ import {
   contactsOf,
   countdownLeft,
   createPartyClient,
+  applyGuestFace,
   easePose,
   holdAtLine,
   lerpPose,
@@ -103,6 +104,11 @@ test("easing follows the host pose and snaps when the cans are far apart", () =>
   const local = { s: 0, offset: 0, speed: 1 };
   const eased = easePose(local, { s: 10, offset: 0, speed: 5 }, 0.1);
   assert.equal(eased.s, 4);
+  const lead = easePose({ s: 5, offset: 0, speed: 2 }, { s: 5.4, offset: 0, speed: 2 }, 0.016);
+  assert.equal(lead.s, 5);
+  const guest = { eject: { face: 0 } };
+  applyGuestFace(guest, { face: Math.PI });
+  assert.equal(guest.eject.face, Math.PI);
   assert.equal(local.s, 0);
   assert.equal(local.speed, 1);
   const snapped = easePose(local, { s: 20, offset: 0, speed: 4 }, 0.1);

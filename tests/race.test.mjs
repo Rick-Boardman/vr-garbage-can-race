@@ -998,6 +998,22 @@ test("on foot, W walks the way you face and A strafes left", () => {
   assert.equal(state.eject.face, faced, "A strafes and does not turn");
   assert.ok(state.eject.bodyOffset < offset - 0.1, `strafe ${state.eject.bodyOffset} from ${offset}`);
 
+  state.eject.face = Math.PI;
+  state.eject.bodyAlong = 0;
+  state.eject.bodyLat = 0;
+  state.eject.bodyHop = 0;
+  state.eject.bodyVy = 0;
+  const uphillOffset = state.eject.bodyOffset;
+  stepRide(state, {
+    dt: 0.05,
+    steer: 0,
+    strafe: -1,
+    throttle: 0,
+    sample: sampleCourse(course, state.s),
+    hazards: [],
+  });
+  assert.ok(state.eject.bodyOffset > uphillOffset + 0.1, `uphill A went ${state.eject.bodyOffset} from ${uphillOffset}`);
+
   const flatSample = {
     x: 0,
     y: 0,

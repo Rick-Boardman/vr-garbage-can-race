@@ -12,6 +12,7 @@ import {
   canHostDevice,
   countdownLeft,
   createPartyClient,
+  applyGuestFace,
   applyRiderEase,
   contactsOf,
   easePose,
@@ -1577,6 +1578,7 @@ function stepPlannedRemote(planned, slice, hazards) {
   for (const row of planned) {
     if (!remoteRides.has(row.slot)) continue;
     const command = row.command;
+    applyGuestFace(row.entry.state, command);
     stepRide(row.entry.state, {
       dt: slice,
       steer: command.steer || 0,
@@ -1706,6 +1708,7 @@ function sendParty(step) {
       steer: resting ? 0 : pending.steer || 0,
       throttle: resting ? 0 : pending.throttle || 0,
       strafe: resting ? 0 : pending.strafe || 0,
+      face: ride.eject ? Math.round((ride.eject.face || 0) * 100) / 100 : 0,
       jumpSeq,
       displayName: cleanName(lobby.name()),
       ...lookFields(lobby.look()),

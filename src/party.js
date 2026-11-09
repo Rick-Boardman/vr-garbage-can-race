@@ -92,17 +92,35 @@ export function poseOf(ride) {
 export function easePose(local, remote, step) {
   const ds = (Number(remote?.s) || 0) - (Number(local?.s) || 0);
   const dOffset = (Number(remote?.offset) || 0) - (Number(local?.offset) || 0);
-  const snap = Math.abs(ds) + Math.abs(dOffset) > 12;
-  const blend = snap ? 1 : Math.min(1, Math.max(0, Number(step) || 0) * 4);
-  const mix = (from, to) => (Number(from) || 0) + ((Number(to) || 0) - (Number(from) || 0)) * blend;
-  if (snap) {
+  const gap = Math.hypot(ds, dOffset);
+  if (gap > 12) {
     return { s: Number(remote?.s) || 0, offset: Number(remote?.offset) || 0, speed: Number(remote?.speed) || 0 };
   }
+  // The guest already walked this step. A short lead is not a miss, so the
+  // host pose does not drag them backward.
+  if (gap < 0.8) {
+    return {
+      s: Number(local?.s) || 0,
+      offset: Number(local?.offset) || 0,
+      speed: Number(local?.speed) || 0,
+    };
+  }
+  const blend = Math.min(1, Math.max(0, Number(step) || 0) * 4);
+  const mix = (from, to) => (Number(from) || 0) + ((Number(to) || 0) - (Number(from) || 0)) * blend;
   return {
     s: mix(local?.s, remote?.s),
     offset: mix(local?.offset, remote?.offset),
     speed: mix(local?.speed, remote?.speed),
   };
+}
+
+// The guest owns the facing they are looking. The host uses it for the
+// step instead of a face that was never turned.
+export function applyGuestFace(state, command) {
+  if (!state?.eject) return;
+  const face = Number(command?.face);
+  if (!Number.isFinite(face)) return;
+  state.eject.face = face;
 }
 
 // Push overlapping riders apart along the course (s, offset). This is not
