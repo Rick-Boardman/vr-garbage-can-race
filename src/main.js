@@ -40,7 +40,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { placeHudMount, stageVrPanels } from "./vr-chrome.js";
+import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
 import {
   footDragStick,
   footStrafe,
@@ -397,6 +397,8 @@ const boot = createSceneHudBootstrap({
   },
   hudOptions: {
     uiPreset: "minimal",
+    vrLayoutW: VR_LAYOUT_W,
+    vrLayoutH: VR_LAYOUT_H,
     hotbarSlotCount: 8,
     reserveSystemHotbarSlots: false,
 
@@ -500,7 +502,7 @@ hudSystem.setHelpOverrideLines([
   "In the can you look down the road.",
   "Out of the can, the left stick walks and strafes.",
   "The right stick turns the view and the way you walk. X or A jumps.",
-  "The panels sit further around the sphere. Turn your head to bring one in.",
+  "The panels sit at the edge of the view, on the sphere. The road stays clear.",
   "",
   "Phone",
   "Tilt the phone. Allow motion when the browser asks.",
@@ -578,11 +580,10 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  // Halo's side pins, not the forward cap. The road stays in the middle.
-  const hud = hudSystem?.hud;
   stageVrPanels({
-    windows: hud?.ui?.windows,
-    layoutH: hud?.layoutH,
+    windows: hudSystem?.hud?.ui?.windows,
+    layoutW: VR_LAYOUT_W,
+    layoutH: VR_LAYOUT_H,
     eyePitch: vrEyePitch,
   });
 }
@@ -872,10 +873,10 @@ function placeWorld(presenting) {
     const posePitch = poseQ ? referencePitch(poseQ.x, poseQ.y, poseQ.z, poseQ.w) : 0;
     const placed = vrPresentRig(eye, heading, poseYaw, pitch, poseP);
     if (playerYaw) playerYaw.rotation.set(0, placed.rigYaw, 0);
-    // The sphere stays level in the rig. Turning the head looks around it.
-    // The root stays at rotation 0, which is what Halo raycasts.
+    // Aim the sphere at the locked look. The panels are 50° off that aim,
+    // so the road stays in the middle. Root rotation stays 0 for the click.
     vrEyePitch = pitch + posePitch;
-    placeHudMount(hudMount, hudSystem?.hud?.root, 0, 0);
+    placeHudMount(hudMount, hudSystem?.hud?.root, poseYaw, vrEyePitch);
     holdVrPanels();
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);

@@ -15,7 +15,7 @@ import {
   vrStickPair,
 } from "../src/input.js";
 import { placeHudMount } from "../src/vr-chrome.js";
-import { VIEWS, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
+import { VIEWS, referencePitch, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
   const forward = { x: 0, y: 0, z: -1 };
@@ -281,24 +281,18 @@ test("a headset turned around in the room still looks down the road", () => {
         else assert.ok(pos.distanceTo(eye) < 1e-4, `eye moved ${pos.distanceTo(eye)} at yaw ${turned}`);
       }
 
-      // The mount does not follow headset yaw. Turning the head looks
-      // around the sphere. The panel at layout yaw -poseYaw, pitched with
-      // the look, comes to the center. The root stays at rotation 0.
-      placeHudMount(mount, hud, 0, 0);
+      // The mount aims the sphere at the locked look for every room yaw.
+      // The root stays at rotation 0, which is what Halo raycasts.
+      const eyePitch = viewPitch + referencePitch(pose.x, pose.y, pose.z, pose.w);
+      placeHudMount(mount, hud, py, eyePitch);
       player.updateMatrixWorld(true);
       assert.equal(hud.rotation.y, 0);
       hud.getWorldQuaternion(hudQuat);
-      const side = -py;
-      const lookPitch = viewPitch + posePitch;
-      panelDir.set(
-        Math.sin(side) * Math.cos(lookPitch),
-        Math.sin(lookPitch),
-        -Math.cos(side) * Math.cos(lookPitch),
-      ).applyQuaternion(hudQuat).normalize();
+      panelDir.set(0, 0, -1).applyQuaternion(hudQuat).normalize();
       const camDir = new THREE.Vector3();
       cam.getWorldDirection(camDir);
       const aimed = camDir.dot(panelDir);
-      assert.ok(aimed > 0.999, `head turn missed the side panel ${aimed} at yaw ${turned}`);
+      assert.ok(aimed > 0.999, `sphere left the eyes ${aimed} at yaw ${turned}`);
     }
   }
   assert.ok(eye.y < anchor.y + posePos.y, "the downward pitch does not lift the eye into the hill");

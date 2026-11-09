@@ -6,7 +6,7 @@ import {
   HUD_VR_DISTANCE_M,
   HUD_VR_SURFACE_WIDTH_M,
 } from "../node_modules/@rb/halo/src/hud-placement-policy.js";
-import { placeHudMount, stageVrPanels, VR_LEFT_X, VR_RIGHT_X } from "../src/vr-chrome.js";
+import { placeHudMount, stageVrPanels, VR_LAYOUT_W, VR_SIDE_YAW } from "../src/vr-chrome.js";
 
 function windows() {
   return {
@@ -23,29 +23,32 @@ function windows() {
 
 function layoutYaw(win) {
   const span = 2 * Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
-  return ((win.x + win.w / 2) / 1024 - 0.5) * span;
+  return ((win.x + win.w / 2) / VR_LAYOUT_W - 0.5) * span;
 }
 
-test("open panels sit on Halo's side pins, further around than the forward cap", () => {
+test("open panels sit just past the forward cap, at the edge of the view", () => {
   const hud = windows();
-  stageVrPanels({ windows: hud });
+  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W });
   const cap = Math.atan((HUD_VR_SURFACE_WIDTH_M * 0.5) / HUD_VR_DISTANCE_M);
   assert.equal(hud.debug.y, -2000);
   assert.equal(hud.status.y, -2000);
   assert.equal(hud.settings.y, -2000);
-  assert.equal(hud.race.x, VR_LEFT_X);
-  assert.equal(hud.hotbar.x, VR_LEFT_X);
-  assert.equal(hud["race-chat"].x, VR_RIGHT_X);
-  assert.equal(hud.xr.x, VR_RIGHT_X);
-  assert.ok(hud.xr.y > -1000);
-  for (const key of ["race", "help", "race-chat", "hotbar", "xr"]) {
+  for (const key of ["race", "help", "hotbar"]) {
     const yaw = layoutYaw(hud[key]);
-    assert.ok(Math.abs(yaw) > cap, `${key} is still on the forward cap ${yaw}`);
+    assert.ok(yaw < -cap, `${key} is still on the forward cap ${yaw}`);
+    assert.ok(Math.abs(yaw - -VR_SIDE_YAW) < 0.2, `${key} yaw ${yaw}`);
   }
+  for (const key of ["race-chat", "xr"]) {
+    const yaw = layoutYaw(hud[key]);
+    assert.ok(yaw > cap, `${key} is still on the forward cap ${yaw}`);
+    assert.ok(Math.abs(yaw - VR_SIDE_YAW) < 0.2, `${key} yaw ${yaw}`);
+  }
+  assert.ok(hud.xr.y > -1000);
   hud.settings.y = 40;
-  stageVrPanels({ windows: hud });
-  assert.equal(hud.settings.x, VR_RIGHT_X);
-  assert.ok(Math.abs(layoutYaw(hud.settings)) > cap);
+  stageVrPanels({ windows: hud, layoutW: VR_LAYOUT_W });
+  const settingsYaw = layoutYaw(hud.settings);
+  assert.ok(settingsYaw > cap);
+  assert.ok(Math.abs(settingsYaw - VR_SIDE_YAW) < 0.2);
 });
 
 test("the mount keeps the sphere center fixed and the root at rotation 0", () => {
