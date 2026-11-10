@@ -1283,12 +1283,28 @@ function releaseLine() {
   }
 }
 
+function showWaitingTable() {
+  gate = "lobby";
+  holdAtLine(ride, START_S);
+  hillNote = "";
+  chatPanel?.dispose();
+  chatPanel = null;
+  lobby.setCountdown("");
+  lobby.setRoom({ ...partyClient.room, role: partyMode });
+  lobby.show();
+  lobby.bindChat(partyClient.chatTransport());
+}
+
 function enterHill() {
   const next = partyClient.room;
   if (!next?.code) return;
   const startsAt = next.startsAt || "";
   const seed = Number(next.seed);
   const counting = next.phase === "counting" || next.phase === "racing" || !!next.sealed;
+  if (!counting) {
+    showWaitingTable();
+    return;
+  }
   const onHill = gate === "waiting" || gate === "countdown" || gate === "racing";
   const sameSeed = Number.isFinite(seed) && (Number(course.seed) >>> 0) === (seed >>> 0);
   const sameRoom = heldCode === next.code;
@@ -1419,7 +1435,7 @@ async function beginSeal() {
       partyClient.room.seed = result.room.seed;
     }
     roomSealed = true;
-    if (result?.room?.phase === "counting" || result?.room?.phase === "racing") enterHill();
+    // The shared countdown event moves every seated player onto the hill.
   } catch (error) {
     const message = error?.message || "Could not start.";
     lobby.setStatus(message);
@@ -1450,6 +1466,7 @@ async function beginInvite(actor) {
       return;
     }
     await partyClient.invite(actor);
+    lobby.noteInvite(actor);
     lobby.setStatus("Invite sent.");
   } catch (error) {
     lobby.setStatus(error?.message || "Could not invite.");
@@ -1473,6 +1490,7 @@ async function beginAccept() {
 function onPartyEvent(event) {
   if (!event || event.kind === "probe" || event.type === "probe") return;
   if (event.kind === "countdown") {
+    roomSealed = true;
     if (partyClient.room) {
       partyClient.room.startsAt = event.startsAt;
       partyClient.room.phase = "counting";
@@ -1490,11 +1508,7 @@ function onPartyEvent(event) {
     }
     roomSealed = false;
     heldStartsAt = "";
-    if (gate === "countdown" || gate === "waiting" || gate === "racing") {
-      gate = "waiting";
-      lobby.setCountdown("");
-      showHill(hillChrome(), waitingNote());
-    }
+    showWaitingTable();
     return;
   }
   if (event.kind === "snapshot" && partyMode === "player") {
