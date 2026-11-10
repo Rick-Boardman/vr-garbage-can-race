@@ -1,5 +1,5 @@
 // The game's own front room. People, public chat, and open tables live here.
-// Hosting or joining uncovers the hill and holds the can at the start line.
+// Hosting or joining keeps the table here until the shared countdown opens the hill.
 // The rider and the can are chosen here. Chat and a table need a name that
 // nobody else in this session is using.
 
@@ -277,6 +277,8 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   let me = "";
   let roster = [];
   let seated = [];
+  let roomCode = "";
+  const invited = new Map();
   let soloPrompt = true;
   let sending = false;
   fillSlots(6);
@@ -348,6 +350,8 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
   }
 
   function setRoom(next) {
+    if (roomCode !== (next?.code || "")) invited.clear();
+    roomCode = next?.code || "";
     if (!next?.code) {
       roomCard.hidden = true;
       soloButton.hidden = !soloPrompt;
@@ -360,12 +364,27 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     codeLine.textContent = next.code;
     const started = next.phase === "counting" || next.phase === "racing" || !!next.sealed;
     startButton.hidden = next.role !== "host" || started;
+    paintNames();
   }
 
   function setSlots(slots) {
     seated = slots || [];
-    names.textContent = seated.map((row) => shownName(row.displayName)).join(", ");
+    for (const row of seated) invited.delete(row.actor);
+    paintNames();
     refreshGate();
+  }
+
+  function noteInvite(actor) {
+    if (!roomCode || seated.some((row) => row.actor === actor)) return;
+    const person = roster.find((row) => row.actor === actor);
+    invited.set(actor, shownName(person?.displayName));
+    paintNames();
+  }
+
+  function paintNames() {
+    const waiting = [...invited.values()];
+    names.textContent = `Seated: ${seated.map((row) => shownName(row.displayName)).join(", ")}`
+      + (waiting.length ? ` · Invited: ${waiting.join(", ")}` : "");
   }
 
   function setPeople(list, actor) {
@@ -528,6 +547,7 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     setStatus,
     setRoom,
     setSlots,
+    noteInvite,
     setPeople,
     setGames,
     setMaxPlayers: fillSlots,
