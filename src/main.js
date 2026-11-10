@@ -42,6 +42,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
+import { createTilt } from "./tilt.js";
 import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
 import {
   footDragStick,
@@ -49,14 +50,12 @@ import {
   inputFromHands,
   inputFromKeys,
   inputFromLook,
-  inputFromTilt,
   inputFromVrStick,
   inputFromVrTurn,
   onFootJump,
   onFootSteer,
   selectRideInput,
   stickFromSources,
-  tiltAxes,
   vrJumpDown,
 } from "./input.js";
 
@@ -122,9 +121,6 @@ let frameSamples = 0;
 let frameTime = 0;
 let frameRate = 0;
 let persistedBest = ride.best;
-let latestTilt = null;
-let tiltNeutral = null;
-let tiltListening = false;
 let hudSystem = null;
 let remotes = null;
 let partyMode = "";
@@ -278,43 +274,21 @@ function poseXFor(sources) {
   return xs;
 }
 
-function onOrientation(event) {
-  const angle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
-  const axes = tiltAxes({ beta: event.beta, gamma: event.gamma, screenAngle: angle });
-  if (!tiltNeutral) tiltNeutral = { steer: axes.steerDeg, lean: axes.leanDeg };
-  latestTilt = inputFromTilt({
-    steerDeg: axes.steerDeg,
-    leanDeg: axes.leanDeg,
-    neutralSteer: tiltNeutral.steer,
-    neutralLean: tiltNeutral.lean,
-  });
-}
-
-function enableTilt(recalibrate) {
-  if (recalibrate) tiltNeutral = null;
-  if (tiltListening) return;
-  const orientationEvent = window.DeviceOrientationEvent;
-  if (orientationEvent && typeof orientationEvent.requestPermission === "function") {
-    orientationEvent.requestPermission().then((result) => {
-      if (result === "granted") startTilt();
-    }).catch(() => {});
-    return;
-  }
-  startTilt();
-}
-
-function startTilt() {
-  if (tiltListening) return;
-  window.addEventListener("deviceorientation", onOrientation);
-  tiltListening = true;
-}
+const tilt = createTilt({
+  win: window,
+  status: { get: () => lobby.getStatus(), set: (text) => lobby.setStatus(text) },
+});
 
 window.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "touch") dragIsTouch = true;
   else if (event.pointerType === "mouse" || event.pointerType === "pen") dragIsTouch = false;
-  if (!isCoarse() || tiltListening) return;
-  enableTilt(false);
 });
+for (const type of ["touchend", "click", "pointerup"]) {
+  window.addEventListener(type, (event) => {
+    if (type === "pointerup" && event.pointerType === "mouse") return;
+    if (isCoarse()) tilt.enable();
+  }, { capture: true });
+}
 
 function releaseHeldKey(event) {
   const keys = navigation?.keysDown;
@@ -507,7 +481,8 @@ hudSystem.setHelpOverrideLines([
   "The panels sit at the edge of the view, on the sphere. The road stays clear.",
   "",
   "Phone",
-  "Tilt the phone. Allow motion when the browser asks.",
+  "Tilt the phone to steer. Tip the top away to go faster, toward you to brake.",
+  "Tap once and allow motion when the browser asks. Tilt needs https.",
 ]);
 hudSystem.setWindowHidden("status", true);
 hudSystem.setWindowHidden("debug", true);
@@ -727,6 +702,9 @@ function updateHud() {
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
     `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}   bonus ${Math.floor(ride.bonus || 0)}`,
   );
+  for (const line of tilt.note.split("\n")) {
+    if (line) lines.push(line);
+  }
   if (hillNote) {
     for (const line of hillNote.split("\n")) {
       if (line) lines.push(line);
@@ -951,7 +929,7 @@ function sampleInput(presenting) {
     touch: dragIsTouch,
     pitch: look.getPitch(),
   });
-  const lookSteer = !finger && isCoarse() && !latestTilt && !presenting
+  const lookSteer = !finger && isCoarse() && !tilt.input && !presenting
     ? inputFromLook(yawOffset, look.getPitch())
     : null;
   const keys = inputFromKeys({
@@ -977,9 +955,9 @@ function sampleInput(presenting) {
     hands: presenting ? readHands(controllers, camera) : null,
     vrStick,
     vrTurn: rightStick ? rightStick.x : 0,
-    tilt: finger ? null : latestTilt,
+    tilt: finger ? null : tilt.input,
     keys,
-    preferTilt: !finger && isCoarse() && !!latestTilt,
+    preferTilt: !finger && isCoarse() && !!tilt.input,
   });
   selected.jump = onFootJump(navigation.keysDown);
   if (presenting && ride.eject && vrJumpDown(sources)) {
@@ -1009,6 +987,8 @@ function pressNew() {
 }
 
 function newHill(nextSeed) {
+  // Lean is relative to how the phone is held at the start of each hill.
+  tilt.resetLean();
   const explicit = arguments.length > 0 && Number.isFinite(Number(nextSeed));
   if (!explicit && partyMode) leaveParty("Left the room.", { tellHost: true });
   const numeric = Number.isFinite(Number(nextSeed))

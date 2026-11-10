@@ -349,6 +349,10 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
     status.textContent = text || "";
   }
 
+  function getStatus() {
+    return status.textContent;
+  }
+
   function setRoom(next) {
     if (roomCode !== (next?.code || "")) invited.clear();
     roomCode = next?.code || "";
@@ -545,6 +549,7 @@ export function createLobby({ canHost = true, onHost, onJoin, onSeal, onLeave, o
 
   return {
     setStatus,
+    getStatus,
     setRoom,
     setSlots,
     noteInvite,
