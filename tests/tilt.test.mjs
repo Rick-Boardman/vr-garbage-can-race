@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { inputFromTilt, requestTilt, tiltAxes, TILT_LOG } from "../src/input.js";
+import { createTilt, NO_READINGS } from "../src/tilt.js";
 
 const DEG = Math.PI / 180;
 
@@ -133,4 +134,100 @@ test("motion permission: granted, refused, no gesture, insecure, unsupported", a
     assert.ok(answer.message.split("\n").length <= 2, answer.message);
   }
   assert.equal(TILT_LOG, "[gcr:tilt]");
+});
+
+// The application's tilt handlers, against a fake window, lobby line and timer.
+function harness({ requestPermission, statusText = "" } = {}) {
+  const listeners = {};
+  const timers = [];
+  const logs = [];
+  const orientationEvent = requestPermission ? { requestPermission } : function DeviceOrientationEvent() {};
+  const win = {
+    isSecureContext: true,
+    DeviceOrientationEvent: orientationEvent,
+    screen: { orientation: { angle: 0 } },
+    addEventListener(type, fn) { listeners[type] = fn; },
+  };
+  const lobby = { text: statusText };
+  const status = { get: () => lobby.text, set: (text) => { lobby.text = text; } };
+  const log = { warn: (line) => logs.push(line), info: (line) => logs.push(line) };
+  const tilt = createTilt({ win, status, log, setTimer: (fn) => timers.push(fn) });
+  const orient = (beta, gamma) => listeners.deviceorientation({ beta, gamma });
+  return { tilt, lobby, timers, logs, listeners, orient };
+}
+
+test("late motion readings take the no-readings failure down", async () => {
+  const h = harness();
+  await h.tilt.enable();
+  assert.equal(typeof h.listeners.deviceorientation, "function");
+  for (const fire of h.timers) fire();
+  assert.equal(h.tilt.note, NO_READINGS);
+  assert.equal(h.lobby.text, NO_READINGS.replace("\n", " "));
+  assert.ok(h.logs.some((line) => line.startsWith(`${TILT_LOG} No motion readings`)));
+
+  h.orient(30, 0);
+  h.orient(20, 15);
+  assert.equal(h.tilt.note, "");
+  assert.equal(h.lobby.text, "");
+  assert.ok(h.tilt.input.steer > 0.5, `steer ${h.tilt.input.steer}`);
+  assert.ok(h.tilt.input.throttle > 0.4, `throttle ${h.tilt.input.throttle}`);
+  assert.ok(h.logs.includes(`${TILT_LOG} readings arrived`));
+});
+
+test("late readings leave a lobby message someone else wrote", async () => {
+  const h = harness();
+  await h.tilt.enable();
+  for (const fire of h.timers) fire();
+  h.lobby.text = "Invite sent.";
+  h.orient(30, 0);
+  assert.equal(h.tilt.note, "");
+  assert.equal(h.lobby.text, "Invite sent.");
+});
+
+test("readings in time never show a failure", async () => {
+  const h = harness({ statusText: "Enter a code, or join an open game." });
+  await h.tilt.enable();
+  h.orient(30, 0);
+  for (const fire of h.timers) fire();
+  assert.equal(h.tilt.note, "");
+  assert.equal(h.lobby.text, "Enter a code, or join an open game.");
+});
+
+test("a permission retry that succeeds takes the warning down and listens", async () => {
+  let calls = 0;
+  const h = harness({
+    requestPermission: async () => {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error("needs a user gesture");
+        error.name = "NotAllowedError";
+        throw error;
+      }
+      return "granted";
+    },
+  });
+  await h.tilt.enable();
+  assert.match(h.tilt.note, /NotAllowedError/);
+  assert.match(h.lobby.text, /NotAllowedError/);
+  assert.equal(h.listeners.deviceorientation, undefined);
+
+  await h.tilt.enable();
+  assert.equal(calls, 2);
+  assert.equal(h.tilt.note, "");
+  assert.equal(h.lobby.text, "");
+  assert.equal(typeof h.listeners.deviceorientation, "function");
+  h.orient(0, 20);
+  assert.ok(h.tilt.input.steer > 0.7, `steer ${h.tilt.input.steer}`);
+});
+
+test("a refused permission stays shown and is not asked again", async () => {
+  let calls = 0;
+  const h = harness({ requestPermission: async () => { calls += 1; return "denied"; } });
+  await h.tilt.enable();
+  await h.tilt.enable();
+  assert.equal(calls, 1);
+  assert.match(h.tilt.note, /refused/);
+  assert.match(h.lobby.text, /refused/);
+  assert.equal(h.listeners.deviceorientation, undefined);
+  assert.ok(h.logs.some((line) => line.startsWith(`${TILT_LOG} Motion was refused`)));
 });
