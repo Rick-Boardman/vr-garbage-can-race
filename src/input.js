@@ -4,7 +4,7 @@
 // no move key down, throttle stays 0 so a stop stays a stop.
 // VR: the lower hand steers that way. Both hands below the head speed up;
 // both raised lean back and slow down.
-// Phone tilt: gamma/beta, remapped when the screen is landscape.
+// Phone tilt: gravity from beta/gamma, in screen axes for the screen angle.
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -244,25 +244,88 @@ export function faceFromHead(headX, headZ, forward, right) {
   return Math.atan2(across * span, along);
 }
 
+export const TILT_LOG = "[gcr:tilt]";
+
+const DEG = Math.PI / 180;
+
+function wrapDeg(value) {
+  return ((((value + 180) % 360) + 360) % 360) - 180;
+}
+
+// Gravity in screen axes, from DeviceOrientation's beta and gamma. Reading the
+// Euler angles straight wraps: near upright gamma jumps from 90 to -90 and beta
+// by 180, so a landscape phone flipped to full steer. The gravity vector does
+// not wrap. Down in device axes is (cosβ·sinγ, −sinβ, −cosβ·cosγ); the screen
+// angle turns device x/y into screen right/up (90: screen up is device +x).
+// steerDeg: right edge down is positive, the same flat or held like a wheel.
+// leanDeg: top tipped away from you is positive. Flat is 0, upright facing you −90.
+// Check: portrait beta 30 gamma 0 → steer 0, lean −30.
+//        landscape 90 beta 10 gamma −60 → steer 10, lean ≈ −60.
 export function tiltAxes({ beta, gamma, screenAngle = 0 }) {
-  const angle = ((Number(screenAngle) % 360) + 360) % 360;
-  let steerDeg = gamma;
-  let leanDeg = beta;
-  if (angle === 90) {
-    steerDeg = beta;
-    leanDeg = -gamma;
-  } else if (angle === 270) {
-    steerDeg = -beta;
-    leanDeg = gamma;
+  const b = Number(beta);
+  const g = Number(gamma);
+  if (beta == null || gamma == null || !Number.isFinite(b) || !Number.isFinite(g)) {
+    return { steerDeg: NaN, leanDeg: NaN };
   }
+  const angle = ((Math.round(Number(screenAngle) || 0) % 360) + 360) % 360;
+  const dx = Math.cos(b * DEG) * Math.sin(g * DEG);
+  const dy = -Math.sin(b * DEG);
+  const dz = -Math.cos(b * DEG) * Math.cos(g * DEG);
+  const c = Math.cos(angle * DEG);
+  const s = Math.sin(angle * DEG);
+  const sx = dx * c - dy * s;
+  const sy = dx * s + dy * c;
+  const steerDeg = Math.asin(Math.max(-1, Math.min(1, sx))) / DEG;
+  const leanDeg = -Math.atan2(-sy, -dz) / DEG;
   return { steerDeg, leanDeg };
 }
 
+// Level is level, so steer has no neutral by default. Lean is relative to how
+// the phone was held when tilt started or the hill changed.
 export function inputFromTilt({ steerDeg, leanDeg, neutralSteer = 0, neutralLean = 0 }) {
-  if (![steerDeg, leanDeg].every(Number.isFinite)) return null;
+  if (![steerDeg, leanDeg, neutralSteer, neutralLean].every(Number.isFinite)) return null;
   return {
-    steer: deadzone(clamp((steerDeg - neutralSteer) / 24, -1, 1), 0.07),
-    throttle: deadzone(clamp((leanDeg - neutralLean) / 22, -1, 1), 0.07),
+    steer: deadzone(clamp(wrapDeg(steerDeg - neutralSteer) / 24, -1, 1), 0.07),
+    throttle: deadzone(clamp(wrapDeg(leanDeg - neutralLean) / 22, -1, 1), 0.07),
+  };
+}
+
+// Ask for the motion sensor. Call it from an activating gesture (touchend,
+// click, pointerup of a touch): iOS rejects requestPermission from a touch
+// pointerdown. Resolves { ok: true } or { ok: false, reason, message, retry }.
+// retry is true when a later gesture may still succeed (no activation yet).
+// A message is one or two lines (split on a newline) for the STATUS window.
+export async function requestTilt({ orientationEvent, secure }) {
+  if (secure === false) {
+    return {
+      ok: false,
+      reason: "insecure",
+      message: "Phone tilt needs https.\nOpen the game over https to steer by tilting.",
+      retry: false,
+    };
+  }
+  if (!orientationEvent) {
+    return { ok: false, reason: "unsupported", message: "This browser has no motion sensor.\nDrag to steer.", retry: false };
+  }
+  if (typeof orientationEvent.requestPermission !== "function") return { ok: true };
+  let result;
+  try {
+    result = await orientationEvent.requestPermission();
+  } catch (error) {
+    const name = error?.name || "Error";
+    return {
+      ok: false,
+      reason: "error",
+      message: `Motion permission failed (${name}).\nTap the screen again to allow tilt.`,
+      retry: true,
+    };
+  }
+  if (result === "granted") return { ok: true };
+  return {
+    ok: false,
+    reason: "denied",
+    message: "Motion was refused, so tilt cannot steer.\nAllow motion for this site in the browser settings, then reload.",
+    retry: false,
   };
 }
 

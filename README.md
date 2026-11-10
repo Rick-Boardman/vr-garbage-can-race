@@ -78,7 +78,7 @@ Open http://127.0.0.1:8090. The server binds `127.0.0.1`. `PORT` chooses another
 | V, or 1 / 2 / 3 | First person, just behind, way back |
 | N, or the NEW slot | New hill. The session best remains |
 | VR controllers | Lower hand steers that way. Both low is faster. Both high leans back and slows down |
-| Phone tilt | Tilt the phone to steer. Lean forward goes faster. Lean back slows down. The first sample is neutral |
+| Phone tilt | Tilt the phone to steer: the right edge down turns right, held flat or upright, portrait or landscape. Tip the top away to go faster, toward you to slow down. Level is straight ahead; the lean you hold at the first reading of each hill is neutral. Tap once to allow motion (iOS asks). Needs https; a refused or missing sensor says so in STATUS and logs `[gcr:tilt]` to the console |
 
 WebXR needs HTTPS off localhost, and a browser that can start an immersive session.
 

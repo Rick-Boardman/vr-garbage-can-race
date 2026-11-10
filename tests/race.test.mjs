@@ -258,15 +258,9 @@ test("hands, tilt, and keys steer with the documented signs", () => {
   const brake = inputFromHands({ leftY: 1.7, rightY: 1.72, headY: 1.6 });
   assert.ok(brake.throttle < 0);
 
-  const landscape = tiltAxes({ beta: 20, gamma: 8, screenAngle: 90 });
-  assert.equal(landscape.steerDeg, 20);
-  assert.equal(landscape.leanDeg, -8);
-  const portrait = tiltAxes({ beta: 12, gamma: 18, screenAngle: 0 });
-  assert.equal(portrait.steerDeg, 18);
-  assert.equal(portrait.leanDeg, 12);
-  const turned = tiltAxes({ beta: 10, gamma: 4, screenAngle: 270 });
-  assert.equal(turned.steerDeg, -10);
-  assert.equal(turned.leanDeg, 4);
+  // Full per-angle coverage is in tests/tilt.test.mjs.
+  const portrait = tiltAxes({ beta: 0, gamma: 18, screenAngle: 0 });
+  assert.ok(Math.abs(portrait.steerDeg - 18) < 1e-9);
   const tilted = inputFromTilt({ steerDeg: 24, leanDeg: 22, neutralSteer: 0, neutralLean: 0 });
   assert.ok(tilted.steer > 0.9);
   assert.ok(tilted.throttle > 0.9);

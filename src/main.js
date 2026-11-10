@@ -53,10 +53,12 @@ import {
   inputFromVrStick,
   inputFromVrTurn,
   onFootJump,
+  requestTilt,
   onFootSteer,
   selectRideInput,
   stickFromSources,
   tiltAxes,
+  TILT_LOG,
   vrJumpDown,
 } from "./input.js";
 
@@ -123,8 +125,12 @@ let frameTime = 0;
 let frameRate = 0;
 let persistedBest = ride.best;
 let latestTilt = null;
-let tiltNeutral = null;
+let tiltNeutralLean = null;
 let tiltListening = false;
+let tiltAsking = false;
+let tiltGaveUp = false;
+let tiltSeen = false;
+let tiltNote = "";
 let hudSystem = null;
 let remotes = null;
 let partyMode = "";
@@ -281,40 +287,61 @@ function poseXFor(sources) {
 function onOrientation(event) {
   const angle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
   const axes = tiltAxes({ beta: event.beta, gamma: event.gamma, screenAngle: angle });
-  if (!tiltNeutral) tiltNeutral = { steer: axes.steerDeg, lean: axes.leanDeg };
+  if (!Number.isFinite(axes.steerDeg) || !Number.isFinite(axes.leanDeg)) return;
+  tiltSeen = true;
+  if (tiltNeutralLean == null) tiltNeutralLean = axes.leanDeg;
   latestTilt = inputFromTilt({
     steerDeg: axes.steerDeg,
     leanDeg: axes.leanDeg,
-    neutralSteer: tiltNeutral.steer,
-    neutralLean: tiltNeutral.lean,
+    neutralSteer: 0,
+    neutralLean: tiltNeutralLean,
   });
 }
 
-function enableTilt(recalibrate) {
-  if (recalibrate) tiltNeutral = null;
-  if (tiltListening) return;
-  const orientationEvent = window.DeviceOrientationEvent;
-  if (orientationEvent && typeof orientationEvent.requestPermission === "function") {
-    orientationEvent.requestPermission().then((result) => {
-      if (result === "granted") startTilt();
-    }).catch(() => {});
-    return;
-  }
-  startTilt();
+function reportTilt(message) {
+  tiltNote = message;
+  const flat = message.replace(/\n/g, " ");
+  console.warn(`${TILT_LOG} ${flat}`);
+  lobby.setStatus(flat);
+}
+
+// Runs from touchend / click / a touch pointerup, which are activating
+// gestures. A touch pointerdown is not, and iOS rejects requestPermission there.
+function enableTilt() {
+  if (tiltListening || tiltAsking || tiltGaveUp) return;
+  tiltAsking = true;
+  requestTilt({ orientationEvent: window.DeviceOrientationEvent, secure: window.isSecureContext }).then((answer) => {
+    tiltAsking = false;
+    if (answer.ok) {
+      startTilt();
+      return;
+    }
+    if (!answer.retry) tiltGaveUp = true;
+    reportTilt(answer.message);
+  });
 }
 
 function startTilt() {
   if (tiltListening) return;
   window.addEventListener("deviceorientation", onOrientation);
   tiltListening = true;
+  tiltNote = "";
+  console.info(`${TILT_LOG} listening`);
+  setTimeout(() => {
+    if (!tiltSeen) reportTilt("No motion readings came from this phone.\nTilt cannot steer. Drag to steer.");
+  }, 2000);
 }
 
 window.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "touch") dragIsTouch = true;
   else if (event.pointerType === "mouse" || event.pointerType === "pen") dragIsTouch = false;
-  if (!isCoarse() || tiltListening) return;
-  enableTilt(false);
 });
+for (const type of ["touchend", "click", "pointerup"]) {
+  window.addEventListener(type, (event) => {
+    if (type === "pointerup" && event.pointerType === "mouse") return;
+    if (isCoarse()) enableTilt();
+  }, { capture: true });
+}
 
 function releaseHeldKey(event) {
   const keys = navigation?.keysDown;
@@ -507,7 +534,8 @@ hudSystem.setHelpOverrideLines([
   "The panels sit at the edge of the view, on the sphere. The road stays clear.",
   "",
   "Phone",
-  "Tilt the phone. Allow motion when the browser asks.",
+  "Tilt the phone to steer. Tip the top away to go faster, toward you to brake.",
+  "Tap once and allow motion when the browser asks. Tilt needs https.",
 ]);
 hudSystem.setWindowHidden("status", true);
 hudSystem.setWindowHidden("debug", true);
@@ -727,6 +755,9 @@ function updateHud() {
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
     `crashes ${ride.crashes}   near ${ride.nearMisses}   bumps ${ride.bumps}   bonus ${Math.floor(ride.bonus || 0)}`,
   );
+  for (const line of tiltNote.split("\n")) {
+    if (line) lines.push(line);
+  }
   if (hillNote) {
     for (const line of hillNote.split("\n")) {
       if (line) lines.push(line);
@@ -1009,6 +1040,8 @@ function pressNew() {
 }
 
 function newHill(nextSeed) {
+  // Lean is relative to how the phone is held at the start of each hill.
+  tiltNeutralLean = null;
   const explicit = arguments.length > 0 && Number.isFinite(Number(nextSeed));
   if (!explicit && partyMode) leaveParty("Left the room.", { tellHost: true });
   const numeric = Number.isFinite(Number(nextSeed))
