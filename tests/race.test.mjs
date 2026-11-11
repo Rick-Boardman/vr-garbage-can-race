@@ -4,7 +4,6 @@ import * as THREE from "three";
 
 import { frameFromTravel, garbageCanRaceYaw } from "@rb/arcade/course";
 import { branchCenter, carriageCenter, createCourse, checkCourseFrame, forkAt, holdCarriage, sampleCourse, stayOnRoute, wrapAngle } from "../src/course.js";
-import { checkRibbonFacesUp } from "../src/road.js";
 import { applyFrame } from "../src/frame.js";
 import {
   footDragStick,
@@ -30,6 +29,9 @@ import {
   lateralEvade,
   launchVelocity,
   layFlat,
+  checkRibbonFacesUp,
+  courseRibbonGeometry,
+  crossSectionsAlong,
   overlappingPlayer,
   personHitByCar,
   recoverCruise,
@@ -223,6 +225,50 @@ test("a split-road dash sits in the middle of that road and points along it", ()
 
 test("road ribbons face up on the flat and on a slope", () => {
   assert.deepEqual(checkRibbonFacesUp(), []);
+});
+
+function upwardOnly(geometry) {
+  const normals = geometry.getAttribute("normal");
+  for (let i = 0; i < normals.count; i += 1) if (!(normals.getY(i) > 0)) return false;
+  return true;
+}
+
+test("town strips go through Halo's open ribbon with up-facing flat and sloped spans", () => {
+  const sample = (z, y) => ({ x: 0, y, z, right: { x: 1, y: 0, z: 0 } });
+  for (const samples of [
+    [sample(0, 0), sample(-2, 0), sample(-4, 0)],
+    [sample(0, 1), sample(-2, 0.8), sample(-4, 0.6)],
+  ]) {
+    const geometry = courseRibbonGeometry(samples, -2, 2, 0.1);
+    assert.equal(geometry.getAttribute("position").count, 6, "two vertices per cross-section");
+    assert.equal(geometry.getIndex().count, 12, "open endpoints: two triangles per span, no seam");
+    assert.ok(upwardOnly(geometry), "strip faces up");
+    geometry.dispose();
+  }
+  const pairs = crossSectionsAlong([sample(0, 1)], (s) => -3, () => 2, 0.5);
+  assert.deepEqual(pairs[0].leftPoint, { x: -3, y: 1.5, z: 0 });
+  assert.deepEqual(pairs[0].rightPoint, { x: 2, y: 1.5, z: 0 });
+});
+
+test("a fork's median strip closes to zero width at both ends without breaking the ribbon", () => {
+  const course = createCourse(7);
+  let found = null;
+  for (let s = 0; s < 4000 && !found; s += 40) {
+    if (forkAt(course, s).median > 0.05) found = s;
+  }
+  assert.ok(found !== null, "course has a fork");
+  let start = found;
+  while (forkAt(course, start - 2).median > 0) start -= 2;
+  const samples = [];
+  for (let s = start - 2; s <= start + 200; s += 2) samples.push(sampleCourse(course, s));
+  assert.equal(samples[0].fork.median || 0, 0);
+  const median = (sample) => sample.fork?.median || 0;
+  const geometry = courseRibbonGeometry(samples, (sample) => -median(sample), median, 0.06);
+  assert.ok(upwardOnly(geometry), "median strip faces up");
+  geometry.dispose();
+  const plain = courseRibbonGeometry(samples, (sample) => -sample.halfWidth, (sample) => sample.halfWidth, 0);
+  assert.ok(upwardOnly(plain), "full-width strip faces up");
+  plain.dispose();
 });
 
 test("applyFrame maps local -z to forward and local +x to right", () => {

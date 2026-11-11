@@ -41,9 +41,8 @@ import { acceptedLook, cleanName, lookKey } from "./looks.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "./look.js";
 import { createMaterials } from "./materials.js";
 import { createProps } from "./props.js";
-import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
-import { createTown } from "./town.js";
+import { checkRibbonFacesUp, createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
 import { createOrientationInput } from "@rb/halo/input";
 import {
