@@ -10,8 +10,9 @@ rules, data and persistence. Nothing else lives here.
 
 - Halo (`@rb/halo`) owns the scene rig, frame loop, navigation, input, WebGL HUD and WebXR.
   A capability another game would want is a Halo ticket, not code here.
-- Halo is pinned to a release tag in `package.json` (`github:Rick-Boardman/vr-halo#vX.Y.Z`).
-  Source imports it as `@rb/halo` or `@rb/halo/src/...`. In the browser, `index.html`'s import
+- Halo is pinned to a release tag in `package.json` (`github:Rick-Boardman/vr-halo#vX.Y.Z`), and so
+  is Arcade (`@rb/arcade`, `github:Rick-Boardman/vr-arcade#vX.Y.Z`), the shared game library.
+  Source imports them as `@rb/halo`, `@rb/halo/<export>`, `@rb/halo/src/...` or `@rb/arcade/<export>`. In the browser, `index.html`'s import
   map resolves those names into `node_modules`. In Node, the package's `exports` resolve them.
 - Only the import map names `node_modules`. No source or test imports
   `../node_modules/...`, a sibling checkout (`../halo`, `../lattice`) or a `file:` dependency.
