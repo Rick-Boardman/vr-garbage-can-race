@@ -7,7 +7,7 @@ import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js"
 import { createHotbarIcons } from "./hotbar-icons.js";
 import { RELEASE } from "./release.js";
 import { FOOT_RADIUS, START_S } from "./constants.js";
-import { createLobby } from "./lobby.js";
+import { createGameUi } from "./game-ui.js";
 import {
   canHostDevice,
   countdownLeft,
@@ -34,7 +34,8 @@ import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, w
 import { createDaylight } from "./daylight.js";
 import { STRAFE_SPEED, WALK_SPEED, createRideState, stepRide, walkerForward } from "./drive.js";
 import { createExtremeScraps, readExtreme } from "./extreme.js";
-import { acceptedLook, cleanName, lookKey, nameBlock } from "./looks.js";
+import { applyFrame } from "./frame.js";
+import { acceptedLook, cleanName, lookKey } from "./looks.js";
 import { releasedLook, tumbleLook, undoTouchYaw } from "./look.js";
 import { createMaterials } from "./materials.js";
 import { createProps } from "./props.js";
@@ -132,41 +133,23 @@ let sawSnapshot = false;
 let lastSnapshotAt = 0;
 let latestSnapshot = null;
 let mySlot = 0;
-let roomSealed = false;
 let jumpSeq = 0;
 let jumpHeld = false;
 let relaySendAt = 0;
 let chatPanel = null;
 let partySlots = [];
 let leavingParty = false;
-let namePublish = 0;
+let arrivalRequested = false;
+let arrivalReady = false;
+let magnaLobby = null;
+let gameEntry = 0;
 const remoteRides = new Map();
 const sticksByActor = new Map();
 const shownSnapshot = new Map();
-const partyClient = createPartyClient({
-  base: playBase(window.location.search),
-  site: playSite(window.location.hostname),
-});
-const lobby = createLobby({
-  canHost: canHostDevice(deviceFacts()),
-  onHost: (name, slots) => { void beginHost(name, slots); },
-  onJoin: (code, name) => { void beginJoin(code, name); },
-  onSeal: () => { void beginSeal(); },
-  onLeave: () => beginLeave(),
+const partyClient = createPartyClient();
+const lobby = createGameUi({
   onAlone: () => rideAlone(),
-  onInvite: (actor) => { void beginInvite(actor); },
-  onAccept: () => { void beginAccept(); },
-  onBack: () => backToLobby(),
   onLook: () => wearLook(),
-  onName: (name) => {
-    partyClient.setName(name);
-    window.clearTimeout(namePublish);
-    namePublish = window.setTimeout(() => {
-      partyClient.publishName(name).catch((error) => {
-        if (error?.code === "name_taken") lobby.setStatus(error.message || "That name is already in use.");
-      });
-    }, 400);
-  },
 });
 
 const point = new THREE.Vector3();
@@ -193,6 +176,10 @@ const api = {
       time: posed?.time ?? "",
       seed: course.seed,
       source: pending.source,
+      gate,
+      room: partyClient.code,
+      startsAt: heldStartsAt || null,
+      riders: partySlots.map(row => row.displayName),
       ready: api.ready,
     };
   },
@@ -326,6 +313,7 @@ let look = null;
 let town = null;
 let rider = null;
 let materials = null;
+let startLine = null;
 let rideProps = null;
 let wornKey = "";
 let daylight = null;
@@ -338,9 +326,7 @@ let enterVrSupported = false;
 function syncEnterVrButton() {
   const button = document.getElementById("enter-vr");
   if (!button) return;
-  const lobby = document.getElementById("lobby");
-  const inLobby = !!lobby && !lobby.hidden;
-  button.hidden = !enterVrSupported || !!renderer?.xr?.isPresenting || !inLobby;
+  button.hidden = !enterVrSupported || !!renderer?.xr?.isPresenting || gate === "lobby";
 }
 let controllers = null;
 
@@ -385,7 +371,7 @@ const boot = createSceneHudBootstrap({
       else if (index === HOTBAR.style) lobby.toggleStyle();
       else if (index === HOTBAR.help) hudSystem?.toggleHelp();
       else if (index === HOTBAR.start) {
-        if (gate === "waiting" && partyMode === "host") void beginSeal();
+        if (gate === "waiting") void reportArrival();
       } else if (index === HOTBAR.leave) {
         if (partyMode === "host" || partyMode === "player") beginLeave();
       } else if (index === HOTBAR.lobby) backToLobby();
@@ -424,10 +410,19 @@ const boot = createSceneHudBootstrap({
     scene.add(scraps.group);
     remotes = createRemoteRiders(THREE, scene, materials, rideProps);
     town = createTown(THREE, scene, materials, rideProps);
+    startLine = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 0.025, 0.35),
+      new THREE.MeshBasicMaterial({ color: 0xfff3b5 }),
+    );
+    startLine.name = "race-start-line";
+    scene.add(startLine);
   },
 });
 
 ({ renderer, look, navigation, controllers } = boot);
+// Halo's onEnterVR hook precedes setSession. Three's sessionstart confirms the
+// renderer has actually attached the headset, so a failed session cannot arrive.
+renderer.xr.addEventListener("sessionstart", () => { void reportArrival(); });
 const quality = boot.quality;
 sound.attach(renderer);
 api.audio = () => sound.status();
@@ -493,7 +488,7 @@ hudSystem.setHotbarItems([
   { shortLabel: "GFX", tooltip: "Graphics and sound", iconTexture: hotbarIcons.gear, showNumber: false },
   { shortLabel: "STYLE", tooltip: "Character styling", iconTexture: hotbarIcons.style, showNumber: false },
   { shortLabel: "HELP", tooltip: "How to play", iconTexture: hotbarIcons.help, showNumber: false },
-  { shortLabel: "START", tooltip: "Start the countdown", iconTexture: hotbarIcons.start, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
+  { shortLabel: "READY", tooltip: "Retry reporting arrival", iconTexture: hotbarIcons.start, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
   { shortLabel: "LEAVE", tooltip: "Leave the room", iconTexture: hotbarIcons.leave, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
   { shortLabel: "LOBBY", tooltip: "Lobby", iconTexture: hotbarIcons.lobby, showNumber: false },
 ]);
@@ -597,7 +592,7 @@ function helpOpen() {
   return !!win && win.y > -1000;
 }
 function syncHillSlots(items) {
-  const canStart = gate === "waiting" && partyMode === "host";
+  const canStart = gate === "waiting" && !arrivalRequested;
   const canLeave = partyMode === "host" || partyMode === "player";
   const start = items[HOTBAR.start];
   const leave = items[HOTBAR.leave];
@@ -697,6 +692,10 @@ function updateHud() {
     `${district.name} · ${district.time}`,
     `${Math.round(ride.speed * 3.6)} km/h`,
   ];
+  if (partyMode) {
+    lines.push(`Riders: ${partySlots.map(row => row.displayName).filter(Boolean).join(", ")}`);
+    if (gate === "countdown") lines.push(`Start in ${Math.ceil(countdownLeft(heldStartsAt, Date.now()))}`);
+  }
   if (frameRate > 0) lines.push(`${Math.round(frameRate)} fps`);
   lines.push(
     `${traveled.toFixed(0)} m    best ${best.toFixed(0)} m`,
@@ -720,6 +719,13 @@ function correctTouchDragYaw() {
 }
 
 function placeWorld(presenting) {
+  if (startLine) {
+    const line = sampleCourse(course, START_S + 1.3);
+    startLine.visible = gate !== "lobby";
+    startLine.position.set(line.x, line.y + 0.04, line.z);
+    startLine.scale.x = line.halfWidth * 2;
+    applyFrame(startLine, line);
+  }
   // A finger drag has to be turned around before face and steer read it.
   correctTouchDragYaw();
   const ejected = ride.eject;
@@ -1040,7 +1046,6 @@ function rememberSlots(rows) {
     role: row.role || "",
   })).filter((row) => row.slot != null);
   partyClient.noteSlots(partySlots);
-  lobby.setSlots(partySlots);
   if (partyMode !== "host") return;
   for (const row of partySlots) {
     if (row.slot === mySlot) continue;
@@ -1104,17 +1109,6 @@ function wearLook() {
   if (parent) parent.add(rider.root);
 }
 
-function nameRoster() {
-  return [...(partyClient.people || []), ...partySlots];
-}
-
-function refuseName(name) {
-  const problem = nameBlock(name, nameRoster(), partyClient.actor, { join: true });
-  if (!problem) return false;
-  lobby.setStatus(problem);
-  return true;
-}
-
 function ensureRemote(slot) {
   let entry = remoteRides.get(slot);
   if (!entry) {
@@ -1132,7 +1126,6 @@ function dropSlot(slot) {
   remoteRides.delete(slot);
   partySlots = partySlots.filter((row) => row.slot !== slot);
   partyClient.noteSlots(partySlots);
-  lobby.setSlots(partySlots);
 }
 
 function openChat() {
@@ -1157,7 +1150,7 @@ function openChat() {
 function leaveParty(message, { tellHost = false } = {}) {
   if (leavingParty) return;
   leavingParty = true;
-  const role = partyMode;
+  gameEntry++;
   partyMode = "";
   gate = "lobby";
   heldStartsAt = "";
@@ -1165,25 +1158,26 @@ function leaveParty(message, { tellHost = false } = {}) {
   sawSnapshot = false;
   latestSnapshot = null;
   lastSnapshotAt = 0;
-  roomSealed = false;
   partySlots = [];
   sticksByActor.clear();
   remoteRides.clear();
   shownSnapshot.clear();
   try {
-    if (tellHost && role === "host") partyClient.close().catch(() => {});
-    else if (tellHost && role === "player") partyClient.leave().catch(() => {});
+    if (tellHost) void partyClient.leave().catch(error => {
+      console.error("[gcr:leave]", error);
+      lobby.setStatus(error.message);
+    });
+    arrivalReady = false;
+    arrivalRequested = false;
     partyClient.stop();
     chatPanel?.dispose();
     chatPanel = null;
     remotes?.clear();
     lobby.setCountdown("");
-    lobby.setRoom(null);
-    lobby.setSlots([]);
     lobby.show();
+    void renderer?.xr?.getSession?.()?.end();
     hillNote = "";
     lobby.setHillChrome("none");
-    lobby.bindChat(partyClient.lobbyTransport());
     if (message) lobby.setStatus(message);
   } finally {
     leavingParty = false;
@@ -1194,22 +1188,17 @@ function showHill(chrome, note = "") {
   lobby.hide();
   hillNote = typeof note === "string" ? note : "";
   lobby.setHillChrome(chrome);
+  syncEnterVrButton();
 }
 
 function waitingNote() {
-  const code = partyClient.code;
-  if (gate !== "waiting" || !code) return "";
-  if (partyMode === "host") {
-    return `Waiting at the start line. Others join with ${code}.\nThe start slot begins the ride.`;
-  }
-  return `Waiting at the start line.\nThe host starts ${code}.`;
+  if (gate !== "waiting") return "";
+  return (deviceFacts().headset || enterVrSupported) && !renderer?.xr?.isPresenting
+    ? "Press Enter VR to report in. Waiting for all riders."
+    : "Waiting for all riders to arrive on the hill.";
 }
 
-function hillChrome() {
-  if (gate === "waiting" && partyMode === "host") return "host";
-  if (gate === "solo") return "back";
-  return "leave";
-}
+function hillChrome() { return gate === "solo" ? "back" : "leave"; }
 
 function rideAlone() {
   if (partyMode) leaveParty("", { tellHost: true });
@@ -1221,14 +1210,16 @@ function rideAlone() {
 }
 
 function backToLobby() {
+  mountLobby();
   if (partyMode) leaveParty("", { tellHost: true });
   gate = "lobby";
   holdAtLine(ride, START_S);
   hillNote = "";
   lobby.setCountdown("");
   lobby.show();
+  void renderer?.xr?.getSession?.()?.end();
+  syncEnterVrButton();
   lobby.setHillChrome("none");
-  lobby.bindChat(partyClient.lobbyTransport());
 }
 
 function lineOffset(slot) {
@@ -1240,7 +1231,7 @@ function paintCountdown() {
     lobby.setCountdown("");
     return;
   }
-  const left = countdownLeft(partyClient.room?.startsAt, Date.now());
+  const left = countdownLeft(heldStartsAt, Date.now());
   if (left <= 0) {
     releaseLine();
     return;
@@ -1263,232 +1254,94 @@ function releaseLine() {
   }
 }
 
-function showWaitingTable() {
-  gate = "lobby";
-  holdAtLine(ride, START_S);
-  hillNote = "";
-  chatPanel?.dispose();
-  chatPanel = null;
-  lobby.setCountdown("");
-  lobby.setRoom({ ...partyClient.room, role: partyMode });
-  lobby.show();
-  lobby.bindChat(partyClient.chatTransport());
+// The lobby keeps every seat until Magna starts the table. Only this handoff
+// loads the hill; the server withholds startsAt until all players report in.
+async function enterGame(handoff) {
+  if (!handoff.table.instance) throw new Error("This game needs Magna's instance policy before it can start.");
+  if (partyClient.code === handoff.table.code && partyMode) return;
+  const entry = ++gameEntry;
+  arrivalRequested = false;
+  arrivalReady = false;
+  partyMode = handoff.seat.role === "host" ? "host" : "player";
+  mySlot = slotIndex(handoff.seat) ?? 0;
+  lobby.setName(handoff.seat.displayName);
+  try {
+    applyTable(handoff.table);
+    await partyClient.connect(handoff, magnaLobby.client);
+    if (entry !== gameEntry || !partyMode || partyClient.code !== handoff.table.code) return;
+    wearLook();
+    openChat();
+    // The scene is loaded and relay subscribed before reporting arrival.
+    // Enter VR remains an explicit click; a headset cannot arrive in 2D.
+    arrivalReady = true;
+    await reportArrival();
+  } catch (error) {
+    if (entry !== gameEntry) return;
+    leaveParty(error.message);
+    throw error;
+  }
 }
 
-function enterHill() {
-  const next = partyClient.room;
-  if (!next?.code) return;
-  const startsAt = next.startsAt || "";
-  const seed = Number(next.seed);
-  const counting = next.phase === "counting" || next.phase === "racing" || !!next.sealed;
-  if (!counting) {
-    showWaitingTable();
+async function reportArrival() {
+  if (!arrivalReady || arrivalRequested || !partyClient.code || gate === "lobby") return;
+  if ((deviceFacts().headset || enterVrSupported) && !renderer?.xr?.isPresenting) {
+    hillNote = waitingNote();
+    syncEnterVrButton();
     return;
   }
-  const onHill = gate === "waiting" || gate === "countdown" || gate === "racing";
-  const sameSeed = Number.isFinite(seed) && (Number(course.seed) >>> 0) === (seed >>> 0);
-  const sameRoom = heldCode === next.code;
-  if (onHill && sameRoom && heldStartsAt === startsAt && sameSeed) {
-    if (counting && gate !== "racing") gate = "countdown";
-    paintCountdown();
-    showHill(hillChrome(), waitingNote());
+  arrivalRequested = true;
+  const entry = gameEntry;
+  try {
+    await partyClient.arrive();
+  } catch (error) {
+    if (entry !== gameEntry) return;
+    arrivalRequested = false;
+    hillNote = error.message || "Could not report arrival. Use the start slot to try again.";
+    console.error("[gcr:arrival]", error);
+  }
+}
+
+function applyTable(next) {
+  if (!next?.code || !partyMode) return;
+  if (next.closed || !next.slots.some(row => row.actor === partyClient.actor) && partyClient.actor) {
+    leaveParty("Your table ended or your seat was removed.");
     return;
   }
-  const keepHill = onHill && sameRoom && sameSeed;
-  heldCode = next.code;
-  heldStartsAt = startsAt;
-  if (!keepHill) {
+  if (next.phase === "waiting") {
+    leaveParty("The table returned to the lobby.");
+    return;
+  }
+  const first = heldCode !== next.code;
+  if (first) {
+    heldCode = next.code;
+    heldStartsAt = "";
     sawSnapshot = false;
     latestSnapshot = null;
     remoteRides.clear();
     shownSnapshot.clear();
-    const numeric = Number.isFinite(seed) ? (seed >>> 0) : (Number(course.seed) >>> 0);
-    newHill(numeric || 1);
+    newHill(Number(next.seed) >>> 0 || 1);
   }
-  gate = counting ? "countdown" : "waiting";
-  lobby.bindChat(null);
+  rememberSlots(next.slots);
+  // startsAt is authoritative. Loading has no countdown and cannot release.
+  if (next.startsAt) {
+    heldStartsAt = next.startsAt;
+    if (gate !== "racing") gate = "countdown";
+  } else {
+    gate = "waiting";
+    holdAtLine(ride, START_S);
+  }
   showHill(hillChrome(), waitingNote());
-  openChat();
-  paintCountdown();
-}
-
-function sitDown(result, role) {
-  wearLook();
-  const seated = result.you?.role === "host" || result.you?.role === "player" ? result.you.role : role;
-  partyMode = seated;
-  sawSnapshot = false;
-  latestSnapshot = null;
-  roomSealed = !!result.room?.sealed;
-  mySlot = slotIndex(result.you) ?? 0;
-  lobby.setStatus("");
-  lobby.setRoom({
-    code: result.room.code,
-    role: seated,
-    phase: result.room.phase || "waiting",
-    sealed: !!result.room.sealed,
-  });
-  enterHill();
-  rememberSlots(result.room?.slots);
-}
-
-async function leaveCurrentTable() {
-  if (!partyClient.code) return;
-  if (partyMode === "host") await partyClient.close().catch(() => {});
-  else if (partyMode === "player") await partyClient.leave().catch(() => {});
-  partyMode = "";
-  chatPanel?.dispose();
-  chatPanel = null;
-}
-
-async function beginHost(name, slots) {
-  if (!canHostDevice(deviceFacts())) {
-    lobby.setStatus("A phone can't host. Join from here, or host on a computer or headset.");
-    return;
-  }
-  if (refuseName(name)) return;
-  try {
-    await partyClient.publishName(name);
-  } catch (error) {
-    lobby.setStatus(error?.message || "Could not host.");
-    return;
-  }
-  if (refuseName(name)) return;
-  try {
-    await leaveCurrentTable();
-    const result = await partyClient.host({ seed: course.seed, name, slots: slots ?? lobby.slots() });
-    sitDown(result, "host");
-  } catch (error) {
-    failBackToLobby(error?.message || "Could not host.");
-  }
-}
-
-async function beginJoin(code, name) {
-  const normalized = String(code || "").trim().toUpperCase();
-  if (!normalized) {
-    lobby.setStatus("Enter a code, or join an open game.");
-    return;
-  }
-  if (partyClient.code === normalized && (partyMode === "host" || partyMode === "player")) {
-    enterHill();
-    return;
-  }
-  if (refuseName(name)) return;
-  try {
-    await partyClient.publishName(name);
-  } catch (error) {
-    lobby.setStatus(error?.message || "Could not join.");
-    return;
-  }
-  if (refuseName(name)) return;
-  try {
-    await leaveCurrentTable();
-    const result = await partyClient.join({ code: normalized, name });
-    sitDown(result, result.you?.role === "host" ? "host" : "player");
-  } catch (error) {
-    failBackToLobby(error?.message || "Could not join.");
-  }
-}
-
-function failBackToLobby(message) {
-  partyClient.stop();
-  partyMode = "";
-  gate = "lobby";
-  heldStartsAt = "";
-  heldCode = "";
-  chatPanel?.dispose();
-  chatPanel = null;
-  hillNote = "";
-  lobby.setRoom(null);
-  lobby.show();
-  lobby.bindChat(partyClient.lobbyTransport());
-  lobby.setStatus(message);
-}
-
-async function beginSeal() {
-  if (partyMode !== "host") return;
-  try {
-    const result = await partyClient.seal();
-    if (result?.room && partyClient.room) {
-      partyClient.room.phase = result.room.phase;
-      partyClient.room.startsAt = result.room.startsAt;
-      partyClient.room.sealed = result.room.sealed;
-      partyClient.room.seed = result.room.seed;
-    }
-    roomSealed = true;
-    // The shared countdown event moves every seated player onto the hill.
-  } catch (error) {
-    const message = error?.message || "Could not start.";
-    lobby.setStatus(message);
-    if (gate === "waiting") {
-      hillNote = message;
-      lobby.setHillChrome(hillChrome());
-    }
-  }
+  if (partyClient.code) paintCountdown();
 }
 
 function beginLeave() {
   leaveParty("Left the room.", { tellHost: !!partyMode });
 }
 
-async function beginInvite(actor) {
-  if (!actor || actor === partyClient.actor) return;
-  try {
-    if (!partyClient.code) {
-      if (!canHostDevice(deviceFacts())) {
-        lobby.setStatus("A phone can't host. Join a game, or host on a computer or headset.");
-        return;
-      }
-      await beginHost(lobby.name(), 2);
-      if (partyMode !== "host") return;
-    }
-    if (partyClient.room?.phase && partyClient.room.phase !== "waiting") {
-      lobby.setStatus("That game has already started.");
-      return;
-    }
-    await partyClient.invite(actor);
-    lobby.noteInvite(actor);
-    lobby.setStatus("Invite sent.");
-  } catch (error) {
-    lobby.setStatus(error?.message || "Could not invite.");
-  }
-}
-
-async function beginAccept() {
-  const invite = lobby.takeInvite();
-  if (!invite?.code) return;
-  if (partyClient.code && partyClient.code !== invite.code) {
-    if (partyMode === "host") await partyClient.close().catch(() => {});
-    else if (partyMode === "player") await partyClient.leave().catch(() => {});
-    partyClient.stop();
-    partyMode = "";
-    chatPanel?.dispose();
-    chatPanel = null;
-  }
-  await beginJoin(invite.code, lobby.name());
-}
-
 function onPartyEvent(event) {
   if (!event || event.kind === "probe" || event.type === "probe") return;
-  if (event.kind === "countdown") {
-    roomSealed = true;
-    if (partyClient.room) {
-      partyClient.room.startsAt = event.startsAt;
-      partyClient.room.phase = "counting";
-      partyClient.room.sealed = true;
-      if (event.seed != null) partyClient.room.seed = event.seed;
-    }
-    enterHill();
-    return;
-  }
-  if (event.kind === "countdown-cancelled") {
-    if (partyClient.room) {
-      partyClient.room.phase = "waiting";
-      partyClient.room.sealed = false;
-      partyClient.room.startsAt = null;
-    }
-    roomSealed = false;
-    heldStartsAt = "";
-    showWaitingTable();
+  if (event.kind === "transport-error") {
+    leaveParty(event.message);
     return;
   }
   if (event.kind === "snapshot" && partyMode === "player") {
@@ -1536,9 +1389,6 @@ function onPartyEvent(event) {
     if (slot === mySlot) leaveParty("You were dropped.");
     else dropSlot(slot);
     return;
-  }
-  if (event.kind === "sealed") {
-    roomSealed = true;
   }
 }
 
@@ -1824,7 +1674,7 @@ function tickBody(dt) {
     for (const entry of remoteRides.values()) rideS = Math.min(rideS, entry.state.s);
   }
   if (held()) {
-    const stagger = gate === "countdown";
+    const stagger = !!partyMode;
     const line = [{
       s: START_S,
       offset: stagger ? lineOffset(mySlot) : (ride.offset || 0),
@@ -1849,7 +1699,7 @@ function tickBody(dt) {
   const planned = partyMode === "host" && !held() ? planRemoteFrame() : null;
   if (held()) {
     holdAtLine(ride, START_S);
-    const stagger = gate === "countdown";
+    const stagger = !!partyMode;
     ride.offset = stagger ? lineOffset(mySlot) : 0;
     for (const [slot, entry] of remoteRides) {
       holdAtLine(entry.state, START_S);
@@ -1948,40 +1798,26 @@ updateHud();
 town.update(course, ride.s, 0, 0, { s: ride.s, offset: ride.offset, radius: 0.5 });
 
 partyClient.onRelay(onPartyEvent);
-partyClient.onLobby((event) => {
-  if (!event) return;
-  if (event.kind === "lobby") {
-    lobby.setPeople(event.people, partyClient.actor);
-    lobby.setGames(event.games);
-    return;
-  }
-  if (event.kind === "invite" && event.to && event.to === partyClient.actor) {
-    lobby.showInvite(event);
-    return;
-  }
-  if ((event.kind === "countdown" || event.kind === "countdown-cancelled") && event.code && event.code === partyClient.code) {
-    onPartyEvent(event);
-  }
-});
-lobby.bindChat(partyClient.lobbyTransport());
-if (wantsSolo(window.location.search)) rideAlone();
-void bootLobby();
-window.addEventListener("pagehide", () => {
-  partyClient.leaveLobbyKeepalive();
-  if (partyMode === "host") partyClient.closeKeepalive();
-  else if (partyMode === "player") partyClient.leaveKeepalive();
-});
-
-async function bootLobby() {
-  try {
-    const view = await partyClient.enterLobby({ name: lobby.name() });
-    lobby.setMaxPlayers(view.maxPlayers);
-    lobby.setPeople(view.people, partyClient.actor);
-    lobby.setGames(view.games);
-  } catch (error) {
-    lobby.setStatus(error?.message || "The lobby is offline. Ride alone still works.");
-  }
+partyClient.onTable(applyTable);
+function mountLobby() {
+  if (magnaLobby) return;
+  magnaLobby = lobby.mount({
+    game: "garbage-can-race",
+    name: "Garbage Can Race",
+    art: "./docs/hero.png",
+    baseUrl: `${playBase(window.location.search)}/api/play`,
+    site: playSite(window.location.hostname) || undefined,
+    canHost: () => canHostDevice(deviceFacts()),
+    hostDisabledReason: "A phone cannot host. Join a table from here.",
+    onStart: enterGame,
+  });
 }
+if (wantsSolo(window.location.search)) rideAlone();
+else mountLobby();
+window.addEventListener("pagehide", () => {
+  partyClient.stop();
+  magnaLobby?.destroy();
+});
 
 startAnimationLoop({
   renderer,

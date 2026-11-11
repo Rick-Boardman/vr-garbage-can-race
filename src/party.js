@@ -2,7 +2,7 @@
 // poses come down, and solo play does not open either channel.
 
 import { FOOT_RADIUS } from "./constants.js";
-import { cleanName, nameBlock } from "./looks.js";
+
 
 export const GAME = "garbage-can-race";
 
@@ -471,450 +471,135 @@ function mixAngle(from, to, blend) {
   return start + turn * blend;
 }
 
-export function createPartyClient({
-  fetch: fetchImpl = globalThis.fetch,
-  WebSocket: Socket = globalThis.WebSocket,
-  base = "",
-  site = "",
-  game = GAME,
-} = {}) {
-  let guest = null;
-  let actor = "";
-  let room = null;
-  let you = null;
-  let slots = [];
-  let people = [];
-  let games = [];
-  let maxPlayers = 6;
-  let lobbyName = "";
-  let stopped = false;
-  let seq = 0;
-  const sockets = [];
-  let lobbySocket = null;
-  let presenceBeat = null;
-  const relayListeners = new Set();
-  const chatListeners = new Set();
-  const lobbyListeners = new Set();
-  const lobbyChatListeners = new Set();
-  let chatMessages = [];
-  let chatStatus = "offline";
-  let lobbyMessages = [];
-  let lobbyStatus = "offline";
-
-  async function request(path, { method = "GET", body } = {}) {
-    const headers = { accept: "application/json" };
-    if (body !== undefined) headers["content-type"] = "application/json";
-    if (site) headers["x-magna-site"] = site;
-    const response = await fetchImpl(`${base}${path}`, {
-      method,
-      credentials: "include",
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+export function createPartyClient({ WebSocket: Socket = globalThis.WebSocket } = {}) {
+  let handoff = null, client = null, room = null, socket = null, stopChat = null;
+  let beat = null, generation = 0, tableRevision = 0, seq = 0, messages = [], status = "offline";
+  const relayListeners = new Set(), tableListeners = new Set(), chatListeners = new Set();
+  const emitChat = () => {
+    const view = { messages, status, watching: room?.slots?.length || 0, hasMore: false };
+    for (const listener of chatListeners) listener(view);
+  };
+  const emit = event => { for (const listener of relayListeners) listener(event); };
+  function adopt(table) {
+    tableRevision++;
+    room = table;
+    emitChat();
+    for (const listener of tableListeners) listener(table);
+  }
+  function remember(message) {
+    if (!message?.id || messages.some(row => row.id === message.id)) return;
+    messages = [...messages, message].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).slice(-200);
+    emitChat();
+  }
+  function stop() {
+    generation++;
+    stopChat?.(); stopChat = null;
+    clearInterval(beat); beat = null;
+    const previous = socket; socket = null;
+    previous?.close();
+    handoff = null; client = null; room = null; messages = []; status = "offline";
+    emitChat();
+  }
+  async function connect(next, playClient) {
+    stop();
+    const current = generation;
+    handoff = next; client = playClient; room = next.table; status = "connecting";
+    // Subscribe before reading history/state, so arrival/countdown events cannot be lost.
+    stopChat = next.chat.watch({
+      event(event) {
+        if (current !== generation) return;
+        if (event.kind === "message") remember(event.message);
+        else if (event.kind === "instance" && event.room) adopt(event.room);
+        else if (["joined", "left", "closed", "countdown", "countdown-cancelled"].includes(event.kind)) {
+          void refresh().catch(failed);
+        }
+      },
+      snapshot() {
+        if (current !== generation) return;
+        void Promise.all([refresh(), next.chat.messages()]).then(([, history]) => {
+          if (current !== generation) return;
+          for (const message of history) remember(message);
+        }).catch(failed);
+      },
+      status(value) { if (current === generation) { status = value; emitChat(); } },
+      refused() { if (current === generation) failed(new Error("Access to this game room ended.")); },
     });
-    const text = await response.text();
-    let payload = {};
-    if (text) {
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        payload = { message: text };
-      }
+    function failed(error) {
+      if (current !== generation) return;
+      console.error("[gcr:party]", error);
+      emit({ kind: "transport-error", message: error.message });
     }
-    if (!response.ok) {
-      const friendly = payload.code ? payload.message : "";
-      const error = new Error(String(friendly || `Could not reach the room (${response.status}).`).slice(0, 180));
-      error.status = response.status;
-      error.code = payload.code || "";
+    async function refresh() {
+      const revision = tableRevision;
+      const table = await next.read();
+      if (current === generation && revision === tableRevision) adopt(table);
+    }
+    try {
+      const ticket = await playClient.request(`/rooms/${encodeURIComponent(next.table.code)}/relay-ticket`, {});
+      if (current !== generation) return;
+      const relay = new Socket(ticket.url, ["magna-realtime", `magna-ticket.${ticket.ticket}`]);
+      socket = relay;
+      beat = setInterval(() => {
+        if (relay.readyState === 1) relay.send(JSON.stringify({ action: "heartbeat" }));
+      }, 60000);
+      relay.addEventListener("open", () => relay.send(JSON.stringify({ action: "subscribe" })));
+      relay.addEventListener("message", message => {
+        if (current !== generation) return;
+        let payload;
+        try { payload = JSON.parse(String(message.data)); } catch { return; }
+        if (payload.type === "event" && payload.event?.kind !== "probe") emit(payload.event);
+      });
+      relay.addEventListener("close", () => {
+        if (current === generation) failed(new Error("The race relay disconnected. Return to the lobby to rejoin."));
+      });
+      relay.addEventListener("error", () => failed(new Error("The race relay could not connect.")));
+      await new Promise((resolve, reject) => {
+        if (relay.readyState === 1) return resolve();
+        relay.addEventListener("open", resolve, { once: true });
+        relay.addEventListener("error", () => reject(new Error("The race relay could not connect.")), { once: true });
+        relay.addEventListener("close", () => reject(new Error("The race relay closed.")), { once: true });
+      });
+      if (current === generation) await refresh();
+    } catch (error) {
+      if (current === generation) stop();
       throw error;
     }
-    return payload;
   }
-
-  function emitChat() {
-    const view = { messages: chatMessages, status: chatStatus, watching: slots.length, hasMore: false };
-    for (const listener of chatListeners) listener(view);
-  }
-
-  function rememberMessage(message) {
-    if (!message?.id || chatMessages.some((row) => row.id === message.id)) return;
-    chatMessages = [...chatMessages, message].slice(-200);
-    emitChat();
-  }
-
-  function openSocket(ticket, onEvent, { relay = false, lobby = false } = {}) {
-    const socket = new Socket(ticket.url, ["magna-realtime", `magna-ticket.${ticket.ticket}`]);
-    if (relay) socket.__relay = true;
-    const beat = setInterval(() => {
-      if (socket.readyState === 1) socket.send(JSON.stringify({ action: "heartbeat" }));
-    }, 60000);
-    socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ action: "subscribe" }));
-    });
-    socket.addEventListener("message", (message) => {
-      if (stopped && !lobby) return;
-      let payload;
-      try {
-        payload = JSON.parse(String(message.data));
-      } catch {
-        return;
-      }
-      if (payload?.type === "event" && payload.event && payload.event.kind !== "probe") onEvent(payload.event);
-    });
-    socket.addEventListener("close", () => clearInterval(beat));
-    if (lobby) lobbySocket = socket;
-    else sockets.push(socket);
-    return socket;
-  }
-
-  function dropSockets() {
-    for (const socket of sockets) {
-      try {
-        socket.close();
-      } catch {
-        // Already closed.
-      }
-    }
-    sockets.length = 0;
-  }
-
-  function dropLobbySocket() {
-    if (!lobbySocket) return;
-    try {
-      lobbySocket.close();
-    } catch {
-      // Already closed.
-    }
-    lobbySocket = null;
-  }
-
-  async function connect() {
-    const code = room.code;
-    const [history, chat, relay] = await Promise.all([
-      request(`/api/play/rooms/${encodeURIComponent(code)}/messages`),
-      request(`/api/play/rooms/${encodeURIComponent(code)}/chat-ticket`, { method: "POST", body: {} }),
-      request(`/api/play/rooms/${encodeURIComponent(code)}/relay-ticket`, { method: "POST", body: {} }),
-    ]);
-    chatMessages = [...(history.messages || [])].reverse();
-    chatStatus = "connecting";
-    emitChat();
-    openSocket(chat, (event) => {
-      if (event.kind === "message" && event.message) {
-        rememberMessage(event.message);
-        return;
-      }
-      for (const listener of relayListeners) listener(event);
-    }).addEventListener("open", () => {
-      chatStatus = "live";
-      emitChat();
-    });
-    openSocket(relay, (event) => {
-      for (const listener of relayListeners) listener(event);
-    }, { relay: true });
-  }
-
-  async function ensureGuest() {
-    guest = await request("/api/play/guest", { method: "POST", body: {} });
-    actor = guest?.actor || actor;
-    return guest;
-  }
-
-  function emitLobby() {
-    const event = { kind: "lobby", people, games };
-    for (const listener of lobbyListeners) listener(event);
-  }
-
-  function emitLobbyChat() {
-    const view = { messages: lobbyMessages, status: lobbyStatus, watching: people.length, hasMore: false };
-    for (const listener of lobbyChatListeners) listener(view);
-  }
-
-  function rememberLobby(message) {
-    if (!message?.id || lobbyMessages.some((row) => row.id === message.id)) return;
-    lobbyMessages = [...lobbyMessages, message].slice(-200);
-    emitLobbyChat();
-  }
-
-  function onLobbyEvent(event) {
-    if (!event || event.kind === "probe") return;
-    if (event.kind === "message" && event.message) {
-      rememberLobby(event.message);
-      return;
-    }
-    if (event.kind === "lobby") {
-      if (Array.isArray(event.people)) people = event.people;
-      if (Array.isArray(event.games)) games = event.games;
-    }
-    for (const listener of lobbyListeners) listener(event);
-  }
-
-  function startPresence() {
-    if (presenceBeat) clearInterval(presenceBeat);
-    presenceBeat = setInterval(() => {
-      request("/api/play/lobby", { method: "POST", body: { game, ...named(lobbyName) } })
-        .then((view) => {
-          people = view.people || people;
-          games = view.games || games;
-          if (view.maxPlayers) maxPlayers = Number(view.maxPlayers) || maxPlayers;
-          emitLobby();
-        })
-        .catch(() => {});
-    }, 15000);
-  }
-
-  async function openLobby() {
-    dropLobbySocket();
-    const [history, ticket] = await Promise.all([
-      request(`/api/play/lobby/messages?game=${encodeURIComponent(game)}`),
-      request("/api/play/lobby/chat-ticket", { method: "POST", body: { game } }),
-    ]);
-    lobbyMessages = [...(history.messages || [])].reverse();
-    lobbyStatus = "connecting";
-    emitLobbyChat();
-    openSocket(ticket, onLobbyEvent, { lobby: true }).addEventListener("open", () => {
-      lobbyStatus = "live";
-      emitLobbyChat();
-    });
-  }
-
-  function named(name) {
-    return { displayName: cleanName(name) };
-  }
-
-  function nameRoster() {
-    return [...people, ...slots];
-  }
-
-  async function publishName(name) {
-    lobbyName = cleanName(name ?? lobbyName);
-    await ensureGuest();
-    const view = await request("/api/play/lobby", { method: "POST", body: { game, ...named(lobbyName) } });
-    people = view.people || [];
-    games = view.games || [];
-    if (view.maxPlayers) maxPlayers = Number(view.maxPlayers) || maxPlayers;
-    emitLobby();
-    return view;
-  }
-
-  function adopt(next) {
-    room = next?.room || room;
-    you = next?.you || you;
-    if (room?.slots) slots = room.slots;
-  }
-
-  return {
-    ensureGuest,
-    get room() {
-      return room;
-    },
-    get you() {
-      return you;
-    },
-    get code() {
-      return room?.code || "";
-    },
-    get actor() {
-      return actor;
-    },
-    get people() {
-      return people;
-    },
-    get games() {
-      return games;
-    },
-    get maxPlayers() {
-      return maxPlayers;
-    },
-    setName(name) {
-      lobbyName = cleanName(name);
-    },
-    publishName,
-    noteSlots(next) {
-      if (Array.isArray(next)) slots = next;
-    },
-    async enterLobby({ name } = {}) {
-      lobbyName = cleanName(name ?? lobbyName);
-      await ensureGuest();
-      const view = await request("/api/play/lobby", { method: "POST", body: { game, ...named(lobbyName) } });
-      people = view.people || [];
-      games = view.games || [];
-      if (view.maxPlayers) maxPlayers = Number(view.maxPlayers) || maxPlayers;
-      await openLobby();
-      startPresence();
-      emitLobby();
-      return view;
-    },
-    leaveLobby() {
-      if (presenceBeat) clearInterval(presenceBeat);
-      presenceBeat = null;
-      dropLobbySocket();
-      lobbyStatus = "offline";
-      return request("/api/play/lobby/leave", { method: "POST", body: { game } }).catch(() => null);
-    },
-    leaveLobbyKeepalive() {
-      if (!fetchImpl) return;
-      const headers = { "content-type": "application/json" };
-      if (site) headers["x-magna-site"] = site;
-      try {
-        fetchImpl(`${base}/api/play/lobby/leave`, {
-          method: "POST",
-          credentials: "include",
-          keepalive: true,
-          headers,
-          body: JSON.stringify({ game }),
-        });
-      } catch {
-        // The page is leaving.
-      }
-    },
-    async host({ seed, name, slots } = {}) {
-      stopped = false;
-      await ensureGuest();
-      const body = { game, ...named(name), seed };
-      if (slots != null) body.slots = Number(slots);
-      const next = await request("/api/play/rooms", { method: "POST", body });
-      dropSockets();
-      adopt(next);
-      await connect();
-      return { room, you };
-    },
-    async join({ code, name } = {}) {
-      stopped = false;
-      await ensureGuest();
-      const normalized = String(code || "").trim().toUpperCase();
-      const next = await request(`/api/play/rooms/${encodeURIComponent(normalized)}/join`, {
-        method: "POST",
-        body: named(name),
-      });
-      dropSockets();
-      adopt(next);
-      await connect();
-      return { room, you };
-    },
-    seal() {
-      return request(`/api/play/rooms/${encodeURIComponent(room.code)}/seal`, { method: "POST", body: {} });
-    },
-    invite(actorId) {
-      return request(`/api/play/rooms/${encodeURIComponent(room.code)}/invite`, {
-        method: "POST",
-        body: { actor: actorId },
-      });
-    },
-    leave() {
-      if (!room?.code) return Promise.resolve(null);
-      return request(`/api/play/rooms/${encodeURIComponent(room.code)}/leave`, { method: "POST", body: {} });
-    },
-    leaveKeepalive() {
-      if (!room?.code || !fetchImpl) return;
-      const headers = { "content-type": "application/json" };
-      if (site) headers["x-magna-site"] = site;
-      try {
-        fetchImpl(`${base}/api/play/rooms/${encodeURIComponent(room.code)}/leave`, {
-          method: "POST",
-          credentials: "include",
-          keepalive: true,
-          headers,
-          body: "{}",
-        });
-      } catch {
-        // The page is leaving.
-      }
-    },
-    close() {
-      if (!room?.code) return Promise.resolve(null);
-      return request(`/api/play/rooms/${encodeURIComponent(room.code)}/close`, { method: "POST", body: {} });
-    },
-    closeKeepalive() {
-      if (!room?.code || !fetchImpl) return;
-      const headers = { "content-type": "application/json" };
-      if (site) headers["x-magna-site"] = site;
-      try {
-        fetchImpl(`${base}/api/play/rooms/${encodeURIComponent(room.code)}/close`, {
-          method: "POST",
-          credentials: "include",
-          keepalive: true,
-          headers,
-          body: "{}",
-        });
-      } catch {
-        // The page is leaving.
-      }
-    },
-    sendStick(stick) {
-      return sendRelay({ kind: "stick", seq: ++seq, ...stick });
-    },
-    sendSnapshot(snapshot) {
-      return sendRelay({ kind: "snapshot", seq: ++seq, ...snapshot });
-    },
-    onRelay(listener) {
-      relayListeners.add(listener);
-      return () => relayListeners.delete(listener);
-    },
-    chatTransport() {
-      return {
-        subscribe(listener) {
-          chatListeners.add(listener);
-          listener({ messages: chatMessages, status: chatStatus, watching: slots.length, hasMore: false });
-          return () => chatListeners.delete(listener);
-        },
-        async send(text) {
-          if (nameBlock(lobbyName, nameRoster(), actor)) return false;
-          const saved = await request(`/api/play/rooms/${encodeURIComponent(room.code)}/messages`, {
-            method: "POST",
-            body: { body: text },
-          });
-          if (saved.message) rememberMessage(saved.message);
-          return saved;
-        },
-        nameFor(userId) {
-          const slot = slots.find((row) => row.actor === userId);
-          return slot?.displayName || "";
-        },
-      };
-    },
-    lobbyTransport() {
-      return {
-        subscribe(listener) {
-          lobbyChatListeners.add(listener);
-          listener({ messages: lobbyMessages, status: lobbyStatus, watching: people.length, hasMore: false });
-          return () => lobbyChatListeners.delete(listener);
-        },
-        async send(text) {
-          if (nameBlock(lobbyName, nameRoster(), actor)) return false;
-          await publishName(lobbyName);
-          if (nameBlock(lobbyName, nameRoster(), actor)) return false;
-          const saved = await request("/api/play/lobby/messages", {
-            method: "POST",
-            body: { game, body: text },
-          });
-          if (saved.message) rememberLobby(saved.message);
-          return saved;
-        },
-        nameFor(userId) {
-          const person = people.find((row) => row.actor === userId);
-          return person?.displayName || "";
-        },
-      };
-    },
-    onLobby(listener) {
-      lobbyListeners.add(listener);
-      return () => lobbyListeners.delete(listener);
-    },
-    stop() {
-      stopped = true;
-      room = null;
-      you = null;
-      slots = [];
-      chatMessages = [];
-      chatStatus = "offline";
-      dropSockets();
-      emitChat();
-    },
-  };
-
   function sendRelay(body) {
-    const target = sockets.find((candidate) => candidate.__relay && candidate.readyState === 1);
-    if (!target || stopped) return false;
-    target.send(JSON.stringify({ action: "relay", body }));
+    if (!socket || socket.readyState !== 1 || !handoff) return false;
+    socket.send(JSON.stringify({ action: "relay", body }));
     return true;
   }
+  return {
+    connect, stop,
+    get room() { return room; },
+    get code() { return room?.code || ""; },
+    get actor() { return handoff?.identity.actor || ""; },
+    get you() { return handoff?.seat || null; },
+    noteSlots(slots) { if (room) room = { ...room, slots }; },
+    async arrive() {
+      const current = generation, revision = tableRevision, active = handoff;
+      if (!active) return;
+      const table = await active.arrive();
+      if (current === generation && revision === tableRevision) adopt(table);
+    },
+    async leave() { if (room) await client.action(room.code, "leave"); },
+    sendStick(stick) { return sendRelay({ kind: "stick", seq: ++seq, ...stick }); },
+    sendSnapshot(snapshot) { return sendRelay({ kind: "snapshot", seq: ++seq, ...snapshot }); },
+    onRelay(listener) { relayListeners.add(listener); return () => relayListeners.delete(listener); },
+    onTable(listener) { tableListeners.add(listener); return () => tableListeners.delete(listener); },
+    chatTransport() {
+      return {
+        subscribe(listener) { chatListeners.add(listener); emitChat(); return () => chatListeners.delete(listener); },
+        async send(text) {
+          const current = generation, active = handoff;
+          if (!active) return false;
+          const saved = await active.chat.say(text);
+          if (current === generation) remember(saved);
+          return saved;
+        },
+        nameFor(actor) { return room?.slots.find(row => row.actor === actor)?.displayName || ""; },
+      };
+    },
+  };
 }

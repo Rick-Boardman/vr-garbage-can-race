@@ -67,6 +67,51 @@ Open http://127.0.0.1:8090. The server binds `127.0.0.1`. `PORT` chooses another
 
 `?seed=4` repeats a hill. `?view=first`, `?view=close`, or `?view=far` picks the camera. The default view is just behind the can.
 
+### Multiplayer
+
+The front room is Magna's Play lobby, pinned to release `61275e8c5542` as
+unmodified bytes under `src/vendor/magna-play/`. It owns names, invitations, tables,
+lobby chat and private game-room history. The game supplies its slug, artwork,
+phone hosting restriction and the rider/can dresser. It keeps the hill simulation,
+stick/pose relay and Halo's RIDERS chat panel.
+
+Players stay in the lobby until their table starts. Then everyone loads the same
+hill and waits in a start lane. Desktop reports arrival once the scene and relay
+are ready. A headset must click Enter VR on the hill; arrival waits for the
+renderer to attach the immersive session. Magna publishes one `startsAt` only
+after all remaining seats report in. The HUD shows seated names and countdown;
+the same authorized table chat appears on desktop and in VR. The READY slot
+retries a failed arrival request. A missing instance policy refuses entry.
+
+`config/play-game.json` is the game registration to apply through Magna's
+`POST /api/play/admin/games` on each target site before publishing this version.
+It allows guests, caps tables at six, requires two to start, preserves an
+authoritative host, and gives loading players 120 seconds to arrive. Magna owns
+enforcement and expiration. On netciv.com the client sends the `netciv` site;
+loopback uses the default Play site. No game code names a transport topic.
+
+`npm start` proxies `/api/play/*` to the separate Magna local API on port 4339
+(`PLAY_API_PORT` overrides it). `PLAY_API_URL` selects an existing HTTP(S) API
+origin instead, including dev. Without an API, the lobby reports the failure;
+close its message and choose Ride alone. `?solo=1` opens the hill directly
+without connecting to the lobby. Returning to the lobby mounts it on demand.
+
+The agent proof is `pwsh -NoProfile -File scripts/Verify-MagnaLobby.ps1`.
+It needs the existing Magna checkout/venv and AWS dev credentials, plus optional
+Playwright/Chrome tooling. It mints and revokes a dev machine token, applies the
+canonical game policy on dev (retained), and runs two isolated Chrome contexts
+against the actual dev API through a local proxy. It verifies invite, seating,
+start, delayed arrival, shared countdown, HUD chat and racing, then leaves its
+own table. Screenshots/results go to `.scratchpad/magna-lobby-proof/`.
+The proof adds read-only HUD instrumentation and delays one arrival request;
+it does not mock server responses. It neither deploys nor writes production.
+Physical Quest entry and VR chat have not been exercised on hardware.
+
+The independent reviewer merges and publishes the static tree through the
+existing Magna tree workflow (its `src/` copy includes the pinned module), and applies the policy on
+the target Play site. This integration adds no infrastructure or recurring
+baseline charge; it uses existing static, API and WebSocket traffic.
+
 ### Controls
 
 | Input | Effect |
@@ -91,7 +136,8 @@ npm test
 
 `npm run check` (`scripts/check-imports.mjs`) fails if a source imports a `node_modules` path or a sibling checkout, or if Halo is not a pinned release tag reached through the import map.
 
-Five tests, in `tests/race.test.mjs`: the hill drops and the frame stays right-handed, road ribbons face up, the can's local −z matches downhill, hand / tilt / key signs match the controls above, and a hit counts once.
+Tests in `tests/` cover the hill, controls, collisions, VR rig, HUD chat and
+Magna handoff/arrival lifecycle, including stale snapshots and disposal.
 
 `npm run look` is an optional headless pass. It needs the `playwright` package and Chromium (`npx playwright install chromium`). It is not installed by `npm install`.
 
@@ -104,6 +150,9 @@ Five tests, in `tests/race.test.mjs`: the hill drops and the frame stays right-h
 | `src/town.js` | Chunks, buildings, cars, people, potholes |
 | `src/drive.js` | Speed, steering, crashes, near misses |
 | `src/input.js` | Keys, controller height, phone tilt |
+| `src/game-ui.js` | Pinned Magna lobby integration, solo entry and game chrome |
+| `src/dresser.js` | Game-owned rider/can styling and preview |
+| `src/party.js` | Stick/pose relay and handoff-to-Halo chat adapter |
 | `src/frame.js` | One downhill basis for the can, cars, and people |
 | `scripts/serve.mjs` | Loopback static server |
 

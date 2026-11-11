@@ -42,7 +42,7 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") logs.push(message.text());
   });
-  await page.goto(`http://127.0.0.1:${port}/?seed=7&view=close`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${port}/?seed=7&view=close&solo=1`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => globalThis.__garbageCanRace?.ready === true, null, { timeout: 15000 });
   const before = await page.evaluate(() => globalThis.__garbageCanRace.getState());
   await page.waitForTimeout(1500);
@@ -61,7 +61,10 @@ try {
   const view = await page.evaluate(() => globalThis.__garbageCanRace.getState().viewId);
   if (view !== "first") throw new Error(`expected first view, got ${view}`);
   await page.screenshot({ path: path.join(shots, "first.png") });
+  // Camera captures let traffic advance. Reset before measuring steering so
+  // a passing car cannot have already pushed the can into a different lane.
   await page.evaluate(() => {
+    globalThis.__garbageCanRace.newHill(7);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", code: "KeyA", bubbles: true }));
   });
   await page.waitForTimeout(700);

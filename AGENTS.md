@@ -20,7 +20,8 @@ rules, data and persistence. Nothing else lives here.
   map, so there is one Three.js instance.
 - `npm start` proxies `/api/play/*` to Magna's local play API on `PLAY_API_PORT` (default 4339). That
   server is not in this repository. Without it the lobby says it is not running and offers
-  solo play.
+  solo play. `PLAY_API_URL` selects an existing API origin instead. Magna's pinned lobby
+  lives in `src/vendor/magna-play/`; `config/play-game.json` is the target site's game policy.
 
 ## Verify
 
