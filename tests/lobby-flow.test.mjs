@@ -6,7 +6,7 @@ import vm from "node:vm";
 import { createPartyClient } from "../src/party.js";
 
 test("the vendored lobby is the exact immutable Magna release", () => {
-  const bytes = readFileSync(new URL("../vendor/magna-play/61275e8c5542/play-lobby.js", import.meta.url));
+  const bytes = readFileSync(new URL("../src/vendor/magna-play/61275e8c5542/play-lobby.js", import.meta.url));
   assert.equal(createHash("sha256").update(bytes).digest("hex"),
     "4128c24f64e7ece791ad9dec63968c2f5b8b388b8c6ce6b669acbcaab52e2f6d");
 });

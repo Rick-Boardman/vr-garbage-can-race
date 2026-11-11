@@ -70,7 +70,7 @@ Open http://127.0.0.1:8090. The server binds `127.0.0.1`. `PORT` chooses another
 ### Multiplayer
 
 The front room is Magna's Play lobby, pinned to release `61275e8c5542` as
-unmodified bytes under `vendor/magna-play/`. It owns names, invitations, tables,
+unmodified bytes under `src/vendor/magna-play/`. It owns names, invitations, tables,
 lobby chat and private game-room history. The game supplies its slug, artwork,
 phone hosting restriction and the rider/can dresser. It keeps the hill simulation,
 stick/pose relay and Halo's RIDERS chat panel.
@@ -108,7 +108,7 @@ it does not mock server responses. It neither deploys nor writes production.
 Physical Quest entry and VR chat have not been exercised on hardware.
 
 The independent reviewer merges and publishes the static tree through the
-existing Magna tree workflow, including `vendor/`, and applies the policy on
+existing Magna tree workflow (its `src/` copy includes the pinned module), and applies the policy on
 the target Play site. This integration adds no infrastructure or recurring
 baseline charge; it uses existing static, API and WebSocket traffic.
 

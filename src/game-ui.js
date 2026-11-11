@@ -1,6 +1,6 @@
 // Only game chrome lives here: solo entry, status, countdown and the dresser.
 // Tables, names, invitations and lobby chat are rendered by the pinned Magna module.
-import { mountPlayLobby } from "../vendor/magna-play/61275e8c5542/play-lobby.js";
+import { mountPlayLobby } from "./vendor/magna-play/61275e8c5542/play-lobby.js";
 import { createDresser } from "./dresser.js";
 import { cleanName, recallName, rememberName } from "./looks.js";
 
