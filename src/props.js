@@ -2056,7 +2056,9 @@ export function createProps(THREE, materials) {
         const bucket = { mesh, items: [] };
         sets.set(material, bucket);
         for (const item of items) {
-          const id = mesh.addGeometry(item.geometry);
+          // Three.js 0.185: addGeometry returns a geometry id; the instance that
+          // setMatrixAt addresses comes from addInstance.
+          const id = mesh.addInstance(mesh.addGeometry(item.geometry));
           bucket.items.push({ id, anchor: item.anchor });
           if (!item.geometry.userData.shared) item.geometry.dispose();
         }
