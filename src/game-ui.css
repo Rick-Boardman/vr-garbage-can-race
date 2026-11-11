@@ -1,0 +1,236 @@
+/* Game chrome and the game-owned dresser. Magna supplies its own lobby CSS. */
+[hidden] { display: none !important; }
+#play-entry { position: fixed; inset: 0; z-index: 15; overflow: auto; background: #f5f6f8; font: 16px/1.4 system-ui, sans-serif; }
+#play-entry > button, #play-entry > p { margin: 1rem; }
+#ride-alone, .gcr-dresser button { cursor: pointer; padding: 8px 12px; border: 0; border-radius: 6px; background: #f2c879; color: #14110e; font: inherit; }
+.gcr-dresser { position: relative; }
+#play-style { overflow: auto; }
+
+      #lobby-dresser[hidden] {
+        display: none !important;
+      }
+
+      .gcr-dresser .dresser-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+        margin: 14px 0 8px;
+        padding: 12px 14px;
+        background: #f2c879;
+        color: #14110e;
+        text-align: left;
+        box-shadow: 0 0 0 2px #14110e, 0 0 0 4px #f2c879;
+      }
+
+      .gcr-dresser .dresser-toggle-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .gcr-dresser .dresser-toggle-title {
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .gcr-dresser .dresser-toggle-note {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .gcr-dresser .dresser-toggle-chevron {
+        flex: none;
+        font-size: 22px;
+        line-height: 1;
+      }
+
+      .gcr-dresser .dresser-toggle[aria-expanded="true"] {
+        background: #3d3226;
+        color: #f2c879;
+        box-shadow: 0 0 0 2px #f2c879;
+      }
+
+      .gcr-dresser .dresser-close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 5;
+        margin: 0;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: #f2c879;
+        color: #14110e;
+        font-weight: 700;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+      }
+
+      #lobby-preview-wrap {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        margin: 0 0 8px;
+        background: #14110e;
+      }
+
+      #lobby-preview {
+        display: block;
+        width: 100%;
+        height: 360px;
+        border-radius: 14px;
+        background: radial-gradient(circle at 50% 28%, #3c342c, #16130f 72%);
+        cursor: grab;
+        touch-action: none;
+      }
+
+      .gcr-dresser .preview-hint {
+        color: #f3ead7;
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        margin: 0;
+        padding: 4px 8px;
+        border-radius: 8px;
+        background: rgba(20, 17, 14, 0.72);
+        text-align: center;
+        font-size: 13px;
+        line-height: 1.35;
+        letter-spacing: 0.02em;
+        pointer-events: none;
+      }
+
+      .gcr-dresser .preview-hint span {
+        display: block;
+      }
+
+      .gcr-dresser .dresser-label {
+        margin: 14px 0 6px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.72;
+      }
+
+      .gcr-dresser .lobby-pick {
+        margin: 0 0 10px;
+      }
+
+      .gcr-dresser .lobby-pick > span {
+        display: block;
+        margin: 0 0 4px;
+        font-size: 13px;
+      }
+
+      .gcr-dresser .lobby-icons {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+        gap: 6px;
+      }
+
+      .gcr-dresser .lobby-icons-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .gcr-dresser .lobby-icons button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-height: 72px;
+        margin: 0;
+        padding: 6px 4px;
+        border-radius: 10px;
+        background: #2a241c;
+        color: #f3ead7;
+        font-size: 11px;
+        line-height: 1.1;
+      }
+
+      .gcr-dresser .lobby-icons button svg,
+      .gcr-dresser .lobby-icons button img {
+        width: 36px;
+        height: 36px;
+        object-fit: contain;
+      }
+
+      .gcr-dresser .lobby-icons button[aria-pressed="true"] {
+        outline: 2px solid #f2c879;
+        background: #3d3226;
+      }
+
+      .gcr-dresser .lobby-swatches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .gcr-dresser .lobby-swatches button {
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid #f3ead7;
+        border-radius: 8px;
+      }
+
+      .gcr-dresser .lobby-swatches button[aria-pressed="true"] {
+        outline: 2px solid #f2c879;
+        outline-offset: 2px;
+      }
+
+      #start-countdown {
+        position: fixed;
+        inset: 0;
+        z-index: 16;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        pointer-events: none;
+        color: #f3ead7;
+        font: 96px/1 system-ui, sans-serif;
+        text-shadow: 0 2px 0 #14110e;
+      }
+
+      #play-style {
+        position: fixed;
+        top: 64px;
+        right: 16px;
+        z-index: 16;
+        display: flex;
+        flex-direction: column;
+        width: min(380px, calc(100vw - 32px));
+        max-height: calc(100vh - 80px);
+        box-sizing: border-box;
+        padding: 12px 14px 16px;
+        border-radius: 14px;
+        background: rgba(20, 17, 14, 0.94);
+        color: #f3ead7;
+        font: 16px/1.4 system-ui, sans-serif;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+
+      #play-style-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      #play-style-head p {
+        margin: 0;
+        font-weight: 700;
+      }
+
+      #play-style #play-style-close {
+        margin: 0;
+      }
+
+      #play-style-body {
+        min-height: 0;
+        overflow: auto;
+      }

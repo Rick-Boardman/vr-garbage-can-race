@@ -1,0 +1,13 @@
+{
+  "slug": "garbage-can-race",
+  "displayName": "Garbage Can Race",
+  "audience": "anyone",
+  "maxPlayers": 6,
+  "instance": {
+    "hasHost": true,
+    "readyWhen": "full",
+    "minPlayers": 2,
+    "arrivalTimeoutSeconds": 120,
+    "roomGuests": true
+  }
+}

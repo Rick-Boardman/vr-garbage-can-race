@@ -2,6 +2,7 @@
 // so node_modules can be served without opening hidden files.
 
 import http from "node:http";
+import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,11 +41,16 @@ function localPath(urlPath) {
 // The local play API (Magna features/play/bff/local_server.py). Forwarding /api/play/ to it keeps the game and its
 // rooms on one origin, so plain http://127.0.0.1:8090 can host and join without ?play=.
 const playPort = Number(process.env.PLAY_API_PORT || 4339);
+const playUpstream = new URL(process.env.PLAY_API_URL || `http://127.0.0.1:${playPort}`);
+if (playUpstream.pathname !== "/" || !["http:", "https:"].includes(playUpstream.protocol)) {
+  throw new Error("PLAY_API_URL must be an HTTP(S) origin.");
+}
 
 function forwardPlay(request, response) {
-  const upstream = http.request(
-    { host: "127.0.0.1", port: playPort, path: request.url, method: request.method,
-      headers: { ...request.headers, host: `127.0.0.1:${playPort}` } },
+  const upstream = (playUpstream.protocol === "https:" ? https : http).request(
+    new URL(request.url, playUpstream),
+    { method: request.method,
+      headers: { ...request.headers, host: playUpstream.host } },
     (answer) => {
       response.writeHead(answer.statusCode || 502, answer.headers);
       answer.pipe(response);
@@ -53,7 +59,7 @@ function forwardPlay(request, response) {
   upstream.on("error", () => {
     if (response.headersSent) return response.end();
     response.writeHead(502, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ code: "play_unreachable", message: `The play server on port ${playPort} is not running.` }));
+    response.end(JSON.stringify({ code: "play_unreachable", message: `The play server at ${playUpstream.origin} is not running.` }));
   });
   request.pipe(upstream);
 }

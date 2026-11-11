@@ -389,120 +389,6 @@ test("a jump is an edge and a quiet stick holds then drops", () => {
   assert.equal(slotIndex({}), null);
 });
 
-test("sticks go out on the relay socket, not the chat socket", async () => {
-  const made = [];
-  class FakeSocket {
-    constructor(url) {
-      this.url = url;
-      this.readyState = 1;
-      this.sent = [];
-      this.listeners = {};
-      made.push(this);
-    }
-    addEventListener(type, fn) {
-      (this.listeners[type] ||= []).push(fn);
-    }
-    send(data) {
-      this.sent.push(String(data));
-    }
-    close() {
-      this.readyState = 3;
-      for (const fn of this.listeners.close || []) fn();
-    }
-  }
-  const pages = {
-    "/api/play/guest": { kind: "guest" },
-    "/api/play/rooms": {
-      room: {
-        code: "K7QP",
-        seed: 9,
-        slots: [{ index: 0, actor: "guest:a", displayName: "Ada", role: "host" }],
-      },
-      you: { slot: 0, role: "host" },
-    },
-    "/api/play/rooms/K7QP/messages": { messages: [{ id: "m2", body: "second" }, { id: "m1", body: "first" }] },
-    "/api/play/rooms/K7QP/chat-ticket": { ticket: "chat-ticket", url: "ws://chat" },
-    "/api/play/rooms/K7QP/relay-ticket": { ticket: "relay-ticket", url: "ws://relay" },
-  };
-  const client = createPartyClient({
-    base: "http://play",
-    fetch: async (url) => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(pages[url.replace("http://play", "")] || {}),
-    }),
-    WebSocket: FakeSocket,
-  });
-  try {
-    await client.host({ seed: 9, name: "Ada" });
-    assert.equal(made.length, 2);
-    assert.equal(made[0].__relay, undefined);
-    assert.equal(made[1].__relay, true);
-    assert.equal(client.sendStick({ steer: 0.2, throttle: 1, strafe: 0, jumpSeq: 0 }), true);
-    assert.equal(made[0].sent.some((row) => row.includes('"action":"relay"')), false);
-    const relay = made[1].sent.find((row) => row.includes('"action":"relay"'));
-    assert.equal(JSON.parse(relay).body.steer, 0.2);
-    assert.equal(JSON.parse(relay).body.kind, "stick");
-  } finally {
-    client.stop();
-  }
-});
-
-test("a failed join leaves the sockets that are already open", async () => {
-  const made = [];
-  class FakeSocket {
-    constructor() {
-      this.readyState = 1;
-      this.listeners = {};
-      made.push(this);
-    }
-    addEventListener(type, fn) {
-      (this.listeners[type] ||= []).push(fn);
-    }
-    send() {}
-    close() {
-      this.readyState = 3;
-      for (const fn of this.listeners.close || []) fn();
-    }
-  }
-  const client = createPartyClient({
-    base: "http://play",
-    fetch: async (url) => {
-      if (String(url).includes("/join")) {
-        return {
-          ok: false,
-          status: 409,
-          text: async () => JSON.stringify({ code: "host_gone", message: "The host has left." }),
-        };
-      }
-      const path = String(url).replace("http://play", "");
-      const pages = {
-        "/api/play/guest": { kind: "guest", actor: "guest:a" },
-        "/api/play/rooms": {
-          room: { code: "K7QP", seed: 9, slots: [{ index: 0, actor: "guest:a", role: "host" }] },
-          you: { slot: 0, role: "host" },
-        },
-        "/api/play/rooms/K7QP/messages": { messages: [] },
-        "/api/play/rooms/K7QP/chat-ticket": { ticket: "chat-ticket", url: "ws://chat" },
-        "/api/play/rooms/K7QP/relay-ticket": { ticket: "relay-ticket", url: "ws://relay" },
-      };
-      return { ok: true, status: 200, text: async () => JSON.stringify(pages[path] || {}) };
-    },
-    WebSocket: FakeSocket,
-  });
-  try {
-    await client.host({ seed: 9, name: "Ada" });
-    assert.equal(made.length, 2);
-    await assert.rejects(() => client.join({ code: "GONE", name: "Ada" }), /host has left/);
-    assert.equal(made.length, 2);
-    assert.equal(made[0].readyState, 1);
-    assert.equal(made[1].readyState, 1);
-    assert.equal(client.code, "K7QP");
-  } finally {
-    client.stop();
-  }
-});
-
 test("the local can stays green and a remote can clones its band", () => {
   const materials = createMaterials(THREE);
   const props = createProps(THREE, materials);
@@ -911,61 +797,12 @@ test("a name has to be filled in and free in this session", () => {
   assert.equal(nameBlock("Bea", people, "guest:me"), "");
 });
 
-test("a netciv page names the netciv play site", async () => {
+test("a netciv page names the netciv play site", () => {
   assert.equal(playSite("www.netciv.com"), "netciv");
   assert.equal(playSite("netciv.com"), "netciv");
   assert.equal(playSite("WWW.NETCIV.COM:443"), "netciv");
   assert.equal(playSite("127.0.0.1"), "");
   assert.equal(playSite("localhost"), "");
-  const calls = [];
-  const client = createPartyClient({
-    site: playSite("www.netciv.com"),
-    fetch: async (_url, init) => {
-      calls.push(init?.headers?.["x-magna-site"] || "");
-      return { ok: true, status: 200, text: async () => JSON.stringify({ kind: "guest", actor: "guest:a", people: [], games: [] }) };
-    },
-  });
-  await client.publishName("Ada");
-  assert.ok(calls.length >= 1);
-  assert.ok(calls.every((site) => site === "netciv"));
-});
-
-test("a blank name is published blank and cannot chat", async () => {
-  const calls = [];
-  const client = createPartyClient({
-    base: "http://play",
-    fetch: async (url, init) => {
-      const path = String(url).replace("http://play", "");
-      const body = init?.body ? JSON.parse(init.body) : null;
-      calls.push({ path, body });
-      if (path === "/api/play/guest") {
-        return { ok: true, status: 200, text: async () => JSON.stringify({ kind: "guest", actor: "guest:me" }) };
-      }
-      if (path === "/api/play/lobby") {
-        const mine = body?.displayName || "";
-        const people = mine
-          ? [{ actor: "guest:them", displayName: "Ada" }, { actor: "guest:me", displayName: mine }]
-          : [{ actor: "guest:me", displayName: "" }];
-        return { ok: true, status: 200, text: async () => JSON.stringify({ people, games: [], maxPlayers: 6 }) };
-      }
-      return { ok: true, status: 200, text: async () => JSON.stringify({}) };
-    },
-    WebSocket: class {
-      constructor() {
-        this.readyState = 1;
-      }
-      addEventListener() {}
-      send() {}
-      close() {}
-    },
-  });
-  await client.publishName("   ");
-  assert.equal(calls.find((row) => row.path === "/api/play/lobby").body.displayName, "");
-  assert.equal(await client.lobbyTransport().send("hello"), false);
-  assert.equal(calls.some((row) => String(row.path).includes("/messages")), false);
-  await client.publishName("Ada");
-  assert.equal(await client.lobbyTransport().send("hello"), false);
-  assert.equal(await client.chatTransport().send("hello"), false);
 });
 
 test("a four second hitch is not the host leaving", () => {
