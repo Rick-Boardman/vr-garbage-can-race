@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { nextSettingsPlacement, panelLayout } from "../src/graphics-panel.js";
+import { extremeRow, nextSettingsPlacement } from "../src/graphics-panel.js";
 
 test("the graphics window stays where it was dragged", () => {
   const win = { x: 0, y: 0, w: 200, h: 200, dragging: false, resizing: false };
@@ -38,10 +38,17 @@ test("the graphics window stays where it was dragged", () => {
   assert.equal(win._settingsHiddenX, 180);
 });
 
-test("extreme crashes sits under mute and the notes still fit", () => {
-  const layout = panelLayout(440, 520, [0.5, 1, 1.5]);
-  assert.ok(layout.extreme.y > layout.mute.y);
-  assert.ok(layout.calibrate.y > layout.extreme.y);
-  const notesBottom = layout.calibrate.y + layout.calibrate.h + 22 + 4 * 20;
-  assert.ok(notesBottom < 520, `notes end at ${notesBottom}`);
+test("extreme crashes toggles and is remembered even when the write is refused", () => {
+  const writes = [];
+  // writeExtreme swallows a refused write; the box still shows the choice.
+  const row = extremeRow({ read: () => false, write: () => {} });
+  assert.equal(row.kind, "checkbox");
+  assert.equal(row.checked(), false);
+  row.onToggle(true);
+  assert.equal(row.checked(), true);
+  const quiet = extremeRow({ read: () => true, write: (on) => writes.push(on) });
+  assert.equal(quiet.checked(), true);
+  quiet.onToggle(false);
+  assert.equal(quiet.checked(), false);
+  assert.deepEqual(writes, [false]);
 });
