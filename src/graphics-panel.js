@@ -15,6 +15,9 @@ export const GRAPHICS_PALETTE = Object.freeze({
   well: "#14190c",
 });
 
+// The skinned window frame is wide, so the rows sit 48 px in from its edge.
+export const GRAPHICS_METRICS = Object.freeze({ pad: 48 });
+
 // Rows the game adds under Mute, above Calibrate again.
 // The box shows what was chosen even when a private window refuses the write.
 export function extremeRow({ read = readExtreme, write = writeExtreme } = {}) {
@@ -40,6 +43,7 @@ export function createGraphicsPanel({ THREE, hudSystem, calibration, renderer, n
     extraRows: [extremeRow()],
     notes,
     palette: GRAPHICS_PALETTE,
+    metrics: GRAPHICS_METRICS,
   });
 }
 
