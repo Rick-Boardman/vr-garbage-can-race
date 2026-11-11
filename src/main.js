@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb/halo";
 import { createHudChatPanel } from "@rb/halo/src/ui/chat-panel.js";
+import { createGameEntry } from "@rb/arcade/entry";
 
 import { createSound } from "./audio.js";
 import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js";
@@ -78,9 +79,8 @@ const HOTBAR = {
   settings: 2,
   style: 3,
   help: 4,
-  start: 5,
-  leave: 6,
-  lobby: 7,
+  leave: 5,
+  lobby: 6,
 };
 function readBest() {
   try {
@@ -154,6 +154,8 @@ let arrivalRequested = false;
 let arrivalReady = false;
 let magnaLobby = null;
 let gameEntry = 0;
+// The Arcade entry over the current Magna handoff: watch, table, arrival, countdown and chat.
+let tableEntry = null;
 const remoteRides = new Map();
 const sticksByActor = new Map();
 const shownSnapshot = new Map();
@@ -374,7 +376,7 @@ const boot = createSceneHudBootstrap({
     uiPreset: "minimal",
     vrLayoutW: VR_LAYOUT_W,
     vrLayoutH: VR_LAYOUT_H,
-    hotbarSlotCount: 8,
+    hotbarSlotCount: 7,
     reserveSystemHotbarSlots: false,
 
     onHotbarSlot({ index }) {
@@ -383,9 +385,7 @@ const boot = createSceneHudBootstrap({
       else if (index === HOTBAR.settings) toggleGraphics();
       else if (index === HOTBAR.style) lobby.toggleStyle();
       else if (index === HOTBAR.help) hudSystem?.toggleHelp();
-      else if (index === HOTBAR.start) {
-        if (gate === "waiting") void reportArrival();
-      } else if (index === HOTBAR.leave) {
+      else if (index === HOTBAR.leave) {
         if (partyMode === "host" || partyMode === "player") beginLeave();
       } else if (index === HOTBAR.lobby) backToLobby();
     },
@@ -508,7 +508,6 @@ hudSystem.setHotbarItems([
   { shortLabel: "GFX", tooltip: "Graphics and sound", iconTexture: hotbarIcons.gear, showNumber: false },
   { shortLabel: "STYLE", tooltip: "Character styling", iconTexture: hotbarIcons.style, showNumber: false },
   { shortLabel: "HELP", tooltip: "How to play", iconTexture: hotbarIcons.help, showNumber: false },
-  { shortLabel: "READY", tooltip: "Retry reporting arrival", iconTexture: hotbarIcons.start, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
   { shortLabel: "LEAVE", tooltip: "Leave the room", iconTexture: hotbarIcons.leave, showNumber: false, interactive: false, bgOpacity: 0.34, outlineOpacity: 0.28 },
   { shortLabel: "LOBBY", tooltip: "Lobby", iconTexture: hotbarIcons.lobby, showNumber: false },
 ]);
@@ -607,15 +606,8 @@ function helpOpen() {
   return !!win && win.y > -1000;
 }
 function syncHillSlots(items) {
-  const canStart = gate === "waiting" && !arrivalRequested;
   const canLeave = partyMode === "host" || partyMode === "player";
-  const start = items[HOTBAR.start];
   const leave = items[HOTBAR.leave];
-  if (start) {
-    start.interactive = canStart;
-    start.bgOpacity = canStart ? 0.98 : 0.34;
-    start.outlineOpacity = canStart ? 0.98 : 0.28;
-  }
   if (leave) {
     leave.interactive = canLeave;
     leave.bgOpacity = canLeave ? 0.98 : 0.34;
@@ -1149,7 +1141,7 @@ function openChat() {
   chatPanel = createHudChatPanel({
     hudSystem,
     renderer,
-    transport: partyClient.chatTransport(),
+    transport: tableEntry.transport,
     key: "race-chat",
     title: "RIDERS",
     x: 448,
@@ -1185,6 +1177,9 @@ function leaveParty(message, { tellHost = false } = {}) {
     });
     arrivalReady = false;
     arrivalRequested = false;
+    const ended = tableEntry;
+    tableEntry = null;
+    ended?.dispose();
     partyClient.stop();
     chatPanel?.dispose();
     chatPanel = null;
@@ -1285,6 +1280,7 @@ async function enterGame(handoff) {
     applyTable(handoff.table);
     await partyClient.connect(handoff, magnaLobby.client);
     if (entry !== gameEntry || !partyMode || partyClient.code !== handoff.table.code) return;
+    tableEntry = createGameEntry(handoff, { hooks: entryHooks(entry) });
     wearLook();
     openChat();
     // The scene is loaded and relay subscribed before reporting arrival.
@@ -1298,8 +1294,46 @@ async function enterGame(handoff) {
   }
 }
 
+// Arcade's entry owns the table from arrival on. A hook from an entry that
+// has since been left is ignored.
+function entryHooks(entry) {
+  const current = () => entry === gameEntry && !!partyMode;
+  const notes = {
+    closed: "The room closed.",
+    unseated: "Your table ended or your seat was removed.",
+    left: "Left the room.",
+    dropped: "You were dropped.",
+    refused: "Access to this game room ended.",
+  };
+  return {
+    entered(view) {
+      if (current()) applyTable(view.table);
+    },
+    countdown({ startsAt, cancelled }) {
+      if (!current()) return;
+      if (cancelled) {
+        leaveParty("The table returned to the lobby.");
+        return;
+      }
+      applyTable({ ...partyClient.room, phase: "counting", startsAt });
+    },
+    start() {
+      if (current()) releaseLine();
+    },
+    leave({ reason }) {
+      if (!current() || reason === "leave" || reason === "disposed") return;
+      leaveParty(notes[reason] || "The room closed.");
+    },
+    failure(error) {
+      console.error("[gcr:entry]", error);
+    },
+  };
+}
+
+// Arrival is reported once. A failed arrival is terminal under
+// @rb/arcade/entry: the rider returns to the lobby and gives up the seat.
 async function reportArrival() {
-  if (!arrivalReady || arrivalRequested || !partyClient.code || gate === "lobby") return;
+  if (!arrivalReady || arrivalRequested || !tableEntry || gate === "lobby") return;
   if ((deviceFacts().headset || enterVrSupported) && !renderer?.xr?.isPresenting) {
     hillNote = waitingNote();
     syncEnterVrButton();
@@ -1308,12 +1342,11 @@ async function reportArrival() {
   arrivalRequested = true;
   const entry = gameEntry;
   try {
-    await partyClient.arrive();
+    await tableEntry.enter();
   } catch (error) {
     if (entry !== gameEntry) return;
-    arrivalRequested = false;
-    hillNote = error.message || "Could not report arrival. Use the start slot to try again.";
     console.error("[gcr:arrival]", error);
+    leaveParty(error.message || "Could not report arrival.", { tellHost: true });
   }
 }
 
@@ -1814,7 +1847,6 @@ updateHud();
 town.update(course, ride.s, 0, 0, { s: ride.s, offset: ride.offset, radius: 0.5 });
 
 partyClient.onRelay(onPartyEvent);
-partyClient.onTable(applyTable);
 function mountLobby() {
   if (magnaLobby) return;
   magnaLobby = lobby.mount({
