@@ -3,7 +3,6 @@ import test from "node:test";
 import * as THREE from "three";
 
 import { createCourse, sampleCourse } from "../src/course.js";
-import { createNameTag, nameTagScale } from "../src/name-tag.js";
 import { createRideState, stepRide } from "../src/drive.js";
 import { CAN_COLORS, HAIR_COLORS, OLD_HAIR, RIDER_LOOKS, SKIN_COLORS, acceptedLook, defaultLook, faceHex, lookKey, nameBlock, recallLook, recallName, rememberLook, rememberName, togglePirate } from "../src/looks.js";
 import { createMaterials } from "../src/materials.js";
@@ -853,83 +852,7 @@ test("six riders and the fleet fit in one relay packet", () => {
   assert.ok(bytes < 8192, `snapshot is ${bytes} bytes`);
 });
 
-test("a short name stays tall enough to read and a long name only grows wider", () => {
-  const ada = nameTagScale(180, 100);
-  const longer = nameTagScale(720, 100);
-  assert.ok(ada.y >= 0.3);
-  assert.ok(ada.x > 0.4);
-  assert.equal(longer.y, ada.y);
-  assert.ok(longer.x > ada.x * 2);
-});
-
-test("a longer name allocates a new label texture", () => {
-  const previous = globalThis.document;
-  const canvases = [];
-  globalThis.document = {
-    createElement() {
-      const canvas = { width: 0, height: 0 };
-      canvases.push(canvas);
-      canvas.getContext = () => ({
-        measureText(text) {
-          return { width: String(text || "").length * 40 };
-        },
-        clearRect() {},
-        strokeText() {},
-        fillText() {},
-      });
-      return canvas;
-    },
-  };
-  class CanvasTexture {
-    constructor(canvas) {
-      this.width = canvas.width;
-      this.height = canvas.height;
-      this.disposed = false;
-    }
-    dispose() {
-      this.disposed = true;
-    }
-  }
-  class SpriteMaterial {
-    constructor(options) {
-      this.map = options.map;
-      this.userData = {};
-      this.needsUpdate = false;
-    }
-    dispose() {}
-  }
-  class Sprite {
-    constructor(material) {
-      this.material = material;
-      this.center = { set() {} };
-      this.scale = { set() {} };
-      this.visible = false;
-    }
-  }
-  const fake = {
-    CanvasTexture,
-    SpriteMaterial,
-    Sprite,
-    SRGBColorSpace: "srgb",
-    LinearFilter: "linear",
-  };
-  try {
-    const tag = createNameTag(fake);
-    tag.setText("A");
-    const first = tag.object.material.map;
-    tag.setText("A");
-    assert.equal(tag.object.material.map, first);
-    tag.setText("Arby");
-    const second = tag.object.material.map;
-    assert.notEqual(second, first);
-    assert.equal(first.disposed, true);
-    assert.ok(second.width > first.width, `second ${second.width} first ${first.width}`);
-  } finally {
-    if (previous === undefined) delete globalThis.document;
-    else globalThis.document = previous;
-  }
-});
-
+// Tag sizing and texture rebinding are Arcade's createNameTag, tested there.
 test("a rider wears their name above the head", () => {
   const materials = createMaterials(THREE);
   const props = createProps(THREE, materials);

@@ -1,3 +1,5 @@
+import { appearanceKey } from "@rb/arcade/presentation";
+
 // Rider shirts match the order in props.js SHIRTS. shirtRand (index + 0.5) / 8
 // lands in that shirt. A look with no skin or hair color still draws those
 // from SKIN_DRAW and HAIR_DRAW with the same shirtRand, which is what town
@@ -248,27 +250,10 @@ export function acceptedLook(raw) {
   };
 }
 
+// Identity of a look for rebuilding a rider: Arcade's key-order-independent
+// appearance key over the accepted look.
 export function lookKey(raw) {
-  const look = acceptedLook(raw) || defaultLook();
-  return [
-    look.body,
-    look.age,
-    look.top,
-    look.bottom,
-    look.hair,
-    look.hat,
-    look.skin,
-    look.hairColor,
-    look.complexion,
-    look.shirtRand,
-    look.canShape,
-    look.canSize,
-    look.canMaterial,
-    look.feature,
-    look.can,
-    look.logo,
-    look.logoColor,
-  ].join(":");
+  return appearanceKey(acceptedLook(raw) || defaultLook());
 }
 
 export function rememberLook(storage, look) {
