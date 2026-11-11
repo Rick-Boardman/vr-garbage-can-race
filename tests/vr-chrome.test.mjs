@@ -5,7 +5,7 @@ import * as THREE from "three";
 import {
   HUD_VR_DISTANCE_M,
   HUD_VR_SURFACE_WIDTH_M,
-} from "../node_modules/@rb/halo/src/hud-placement-policy.js";
+} from "@rb/halo/src/hud-placement-policy.js";
 import { placeHudMount, stageVrPanels, VR_LAYOUT_W, VR_SIDE_YAW } from "../src/vr-chrome.js";
 
 function windows() {

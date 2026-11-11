@@ -85,8 +85,11 @@ WebXR needs HTTPS off localhost, and a browser that can start an immersive sessi
 ## Checks
 
 ```sh
+npm run check
 npm test
 ```
+
+`npm run check` (`scripts/check-imports.mjs`) fails if a source imports a `node_modules` path or a sibling checkout, or if Halo is not a pinned release tag reached through the import map.
 
 Five tests, in `tests/race.test.mjs`: the hill drops and the frame stays right-handed, road ribbons face up, the can's local −z matches downhill, hand / tilt / key signs match the controls above, and a hit counts once.
 
