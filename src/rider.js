@@ -1,7 +1,7 @@
+import { createNameTag } from "@rb/arcade/presentation";
 import { CAN_SHELLS } from "./can-geometry.js";
 import { applyFrame } from "./frame.js";
 import { COMPLEXIONS, HAIR_COLORS, SKIN_COLORS, cleanName, mixHex } from "./looks.js";
-import { createNameTag } from "./name-tag.js";
 import { animatePerson, onFootPose } from "./props.js";
 
 // The shell is built with its origin on the road. Spinning that origin
@@ -61,9 +61,7 @@ export function createRider(THREE, materials, props, look = null) {
 
   const logoMount = addLogo(THREE, materials, look);
   const feature = addCanFeature(THREE, look, canScale);
-  const nameTag = createNameTag(THREE);
-  const nameBox = new THREE.Box3();
-  const nameAnchor = new THREE.Vector3();
+  const nameTag = createNameTag(THREE, { name: "rider-name", format: cleanName, createCanvas: nameCanvas });
   let nameText = "";
   root.add(can, person, shadow, nameTag.object);
   if (logoMount) {
@@ -199,21 +197,9 @@ export function createRider(THREE, materials, props, look = null) {
   // World up, from the crown. The body's course frame can tilt on a grade,
   // and a tumble tips the head, so the label is not parented to that rotation.
   function parkName(show) {
-    const text = nameTag.setText(nameText);
-    const sprite = nameTag.object;
-    sprite.visible = !!(show && text);
-    if (!sprite.visible) return;
+    nameTag.setText(nameText);
     const head = person.getObjectByName("person-head");
-    const crown = head?.parent || person;
-    root.updateWorldMatrix(true, true);
-    nameBox.setFromObject(crown);
-    if (nameBox.isEmpty()) return;
-    nameAnchor.set(
-      (nameBox.min.x + nameBox.max.x) / 2,
-      nameBox.max.y + 0.06,
-      (nameBox.min.z + nameBox.max.z) / 2,
-    );
-    root.worldToLocal(sprite.position.copy(nameAnchor));
+    nameTag.placeAbove(head?.parent || person, { lift: 0.06, visible: !!show });
   }
 
   function animate(time) {
@@ -797,4 +783,15 @@ function decal(THREE, shape, width, height, y, side, material, name) {
   return mesh;
 }
 
-
+// The tag paints on a browser canvas. Without a document (the Node tests) it
+// gets a canvas that measures and paints nothing, as the tag did before.
+function nameCanvas() {
+  if (typeof document !== "undefined") return document.createElement("canvas");
+  const context = {
+    measureText: () => ({ width: 0 }),
+    clearRect() {},
+    strokeText() {},
+    fillText() {},
+  };
+  return { width: 0, height: 0, getContext: () => context };
+}

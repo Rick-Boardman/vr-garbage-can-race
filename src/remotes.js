@@ -1,87 +1,42 @@
+import { createRemotePresentation } from "@rb/arcade/presentation";
 import { sampleCourse } from "./course.js";
 import { walkerForward } from "./drive.js";
 import { acceptedLook, lookKey } from "./looks.js";
 import { SLOT_LOOKS, lerpPose } from "./party.js";
 import { createRider } from "./rider.js";
 
-const BLEND_MS = 50;
-
-// Other cans on this hill. Placement goes through sampleCourse and the
-// rider's own place / placeApart, the same frames the local can uses.
+// Other cans on this hill, through Arcade's remote presentation: one rider per
+// slot, rebuilt on a look change, blended between updates, hidden when it
+// leaves. The game supplies the rider builder, its look rules and the course
+// placement (sampleCourse and the rider's own place / placeApart, the same
+// frames the local can uses). The rider wears its own name tag.
 export function createRemoteRiders(THREE, scene, materials, props) {
-  const riders = new Map();
-  const shown = new Map();
-
-  function ensure(slot, pose) {
-    const chosen = acceptedLook(pose);
-    const look = chosen || SLOT_LOOKS[slot % SLOT_LOOKS.length];
-    const key = chosen ? lookKey(chosen) : `slot:${slot % SLOT_LOOKS.length}`;
-    const existing = riders.get(slot);
-    if (existing?.lookKey === key) return existing;
-    if (existing) {
-      existing.dispose?.();
-      existing.root.removeFromParent();
-    }
-    const rider = createRider(THREE, materials, props, look);
-    rider.lookKey = key;
-    rider.root.name = `rider-slot-${slot}`;
-    rider.root.visible = !!existing?.root.visible;
-    scene.add(rider.root);
-    riders.set(slot, rider);
-    return rider;
-  }
-
-  function show(slot, pose, now, snap = false) {
-    ensure(slot, pose);
-    const previous = shown.get(slot);
-    if (snap || !previous) {
-      shown.set(slot, { from: pose, to: pose, at: now });
-      return;
-    }
-    const from = lerpPose(previous.from, previous.to, (now - previous.at) / BLEND_MS);
-    shown.set(slot, { from, to: pose, at: now });
-  }
-
-  function retain(live) {
-    for (const [slot, rider] of riders) {
-      if (live.has(slot)) continue;
-      rider.root.visible = false;
-      shown.delete(slot);
-    }
-  }
-
-  function place(course, now, elapsed) {
-    for (const [slot, rider] of riders) {
-      const entry = shown.get(slot);
-      if (!entry) {
-        rider.root.visible = false;
-        continue;
-      }
-      rider.root.visible = true;
-      const pose = lerpPose(entry.from, entry.to, (now - entry.at) / BLEND_MS);
+  const presentation = createRemotePresentation({
+    parent: scene,
+    blendMs: 50,
+    lookOf: (pose, slot) => acceptedLook(pose) || SLOT_LOOKS[slot % SLOT_LOOKS.length],
+    lookKey: (look, slot) => (look === SLOT_LOOKS[slot % SLOT_LOOKS.length] ? `slot:${slot % SLOT_LOOKS.length}` : lookKey(look)),
+    lerp: lerpPose,
+    create(slot, look) {
+      const rider = createRider(THREE, materials, props, look);
+      rider.root.name = `rider-slot-${slot}`;
+      return rider;
+    },
+    place(rider, pose, { course, elapsed }) {
       rider.setName(pose.displayName);
       placeRider(rider, course, pose, elapsed);
-    }
-  }
+    },
+  });
 
-  function clear() {
-    for (const rider of riders.values()) rider.root.removeFromParent();
-    riders.clear();
-    shown.clear();
-  }
-
-  // The pose on screen this instant. A guest collides with this, which is
-  // the same lerp place() draws. slot is the map key, not a field on the pose.
-  function poses(now) {
-    const list = [];
-    for (const [slot, entry] of shown) {
-      const t = (now - entry.at) / BLEND_MS;
-      list.push({ ...lerpPose(entry.from, entry.to, t), slot });
-    }
-    return list;
-  }
-
-  return { show, retain, place, clear, poses };
+  return {
+    show: (slot, pose, now, snap = false) => presentation.show(slot, pose, now, { snap }),
+    retain: (live) => presentation.retain(live),
+    place: (course, now, elapsed) => presentation.place(now, { course, elapsed }),
+    clear: () => presentation.clear(),
+    // The pose on screen this instant. A guest collides with this, which is
+    // the same blend place() draws. slot is the map key, not a field on the pose.
+    poses: (now) => presentation.poses(now).map((pose) => ({ ...pose, slot: pose.id })),
+  };
 }
 
 function placeRider(rider, course, pose, elapsed) {

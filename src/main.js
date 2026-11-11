@@ -30,7 +30,8 @@ import {
   takeJump,
 } from "./party.js";
 import { createRemoteRiders } from "./remotes.js";
-import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, wrapAngle } from "./course.js";
+import { garbageCanRaceYaw } from "@rb/arcade/course";
+import { checkCourseFrame, createCourse, districtAt, sampleCourse, wrapAngle } from "./course.js";
 import { createDaylight } from "./daylight.js";
 import { STRAFE_SPEED, WALK_SPEED, createRideState, stepRide, walkerForward } from "./drive.js";
 import { createExtremeScraps, readExtreme } from "./extreme.js";
@@ -43,12 +44,17 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { createTilt } from "./tilt.js";
-import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
+import { createOrientationInput } from "@rb/halo/input";
+import {
+  createHudPathCameraMount,
+  createHudPathCameraPanels,
+  HUD_PATH_CAMERA_SIDE_YAW_RAD,
+} from "@rb/halo/hud";
 import {
   footDragStick,
   footStrafe,
   inputFromHands,
+  inputFromTilt,
   inputFromKeys,
   inputFromLook,
   inputFromVrStick,
@@ -57,10 +63,15 @@ import {
   onFootSteer,
   selectRideInput,
   stickFromSources,
+  TILT_LOG,
+  TILT_MESSAGES,
   vrJumpDown,
 } from "./input.js";
 
 const BEST_KEY = "garbage-can-race-best";
+// The VR HUD layout surface, in Halo layout pixels.
+const VR_LAYOUT_W = 2800;
+const VR_LAYOUT_H = 1400;
 const HOTBAR = {
   camera: 0,
   course: 1,
@@ -261,21 +272,23 @@ function poseXFor(sources) {
   return xs;
 }
 
-const tilt = createTilt({
+// Phone tilt through Halo's orientation adapter. Lean is relative to how the
+// phone is held at the first reading of each hill; level is level for steer.
+const tilt = createOrientationInput({
   win: window,
   status: { get: () => lobby.getStatus(), set: (text) => lobby.setStatus(text) },
+  messages: TILT_MESSAGES,
+  logPrefix: TILT_LOG,
 });
+function tiltInput() {
+  return inputFromTilt(tilt.axes);
+}
 
 window.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "touch") dragIsTouch = true;
   else if (event.pointerType === "mouse" || event.pointerType === "pen") dragIsTouch = false;
 });
-for (const type of ["touchend", "click", "pointerup"]) {
-  window.addEventListener(type, (event) => {
-    if (type === "pointerup" && event.pointerType === "mouse") return;
-    if (isCoarse()) tilt.enable();
-  }, { capture: true });
-}
+tilt.bindGestures(window, { when: () => isCoarse() });
 
 function releaseHeldKey(event) {
   const keys = navigation?.keysDown;
@@ -380,10 +393,10 @@ const boot = createSceneHudBootstrap({
       vrSeatEye = null;
       const sample = sampleCourse(course, ride.s);
       if (!look) return;
-      look.setYaw(headingYaw(sample.forward.x, sample.forward.z));
+      look.setYaw(garbageCanRaceYaw({ x: sample.forward.x, y: 0, z: sample.forward.z }));
       look.setPitch(0);
       look.setRoll(0);
-      lastHeading = headingYaw(sample.forward.x, sample.forward.z);
+      lastHeading = garbageCanRaceYaw({ x: sample.forward.x, y: 0, z: sample.forward.z });
     },
     onExitVR() {
       vrSeatEye = null;
@@ -432,9 +445,16 @@ player = boot.rig.player;
 playerYaw = boot.rig.playerYaw;
 head = boot.rig.head;
 let vrEyePitch = 0;
-const hudMount = new THREE.Group();
-hudMount.name = "hud-mount";
-boot.rig.playerPitch.add(hudMount);
+// The camera is locked to the road, so Halo's path-camera mount turns the HUD
+// sphere toward the look and the panels sit in columns just past the forward cap.
+const hudMount = createHudPathCameraMount({ THREE, renderer, hud: hudSystem.hud, name: "hud-mount" });
+const vrPanels = createHudPathCameraPanels({
+  hudSystem,
+  columns: [
+    { yaw: -HUD_PATH_CAMERA_SIDE_YAW_RAD, keys: ["race", "help", "hotbar"] },
+    { yaw: HUD_PATH_CAMERA_SIDE_YAW_RAD, keys: ["xr", "race-chat", "settings"], showKeys: ["xr"] },
+  ],
+});
 const enterVrButton = document.getElementById("enter-vr");
 if (enterVrButton) {
   enterVrButton.addEventListener("click", () => {
@@ -552,12 +572,7 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  stageVrPanels({
-    windows: hudSystem?.hud?.ui?.windows,
-    layoutW: VR_LAYOUT_W,
-    layoutH: VR_LAYOUT_H,
-    eyePitch: vrEyePitch,
-  });
+  vrPanels.place({ pitch: vrEyePitch, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
 }
 function captureVrDesktop() {
   const windows = hudSystem?.hud?.ui?.windows;
@@ -748,12 +763,12 @@ function placeWorld(presenting) {
   const facing = ejected
     ? walkerForward(posed.forward, posed.right, ejected.face || 0)
     : null;
-  const courseHeading = headingYaw(posed.forward.x, posed.forward.z);
+  const courseHeading = garbageCanRaceYaw({ x: posed.forward.x, y: 0, z: posed.forward.z });
   // On foot, eject.face is the view and the walk. The right stick owns it.
   // In the can, heading stays on the course. The headset yaw is cancelled
   // below so a rider turned around in the room still looks along heading.
   const heading = facing
-    ? headingYaw(facing.x, facing.z)
+    ? garbageCanRaceYaw({ x: facing.x, y: 0, z: facing.z })
     : courseHeading;
   // A touch drag holds its pitch for the whole press. Zeroing it here
   // threw the walk stick away before sampleInput could read it.
@@ -862,13 +877,14 @@ function placeWorld(presenting) {
     // Aim the sphere at the locked look. The panels are 50° off that aim,
     // so the road stays in the middle. Root rotation stays 0 for the click.
     vrEyePitch = pitch + posePitch;
-    placeHudMount(hudMount, hudSystem?.hud?.root, poseYaw, vrEyePitch);
+    hudMount.update({ yaw: poseYaw, pitch: vrEyePitch });
     holdVrPanels();
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
   } else {
+    hudMount.update();
     if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
     if (head) head.rotation.set(0, 0, 0);
     player.position.set(followX, posed.y + shoulder + view.pivot + viewHop, followZ);
@@ -935,7 +951,7 @@ function sampleInput(presenting) {
     touch: dragIsTouch,
     pitch: look.getPitch(),
   });
-  const lookSteer = !finger && isCoarse() && !tilt.input && !presenting
+  const lookSteer = !finger && isCoarse() && !tiltInput() && !presenting
     ? inputFromLook(yawOffset, look.getPitch())
     : null;
   const keys = inputFromKeys({
@@ -961,9 +977,9 @@ function sampleInput(presenting) {
     hands: presenting ? readHands(controllers, camera) : null,
     vrStick,
     vrTurn: rightStick ? rightStick.x : 0,
-    tilt: finger ? null : tilt.input,
+    tilt: finger ? null : tiltInput(),
     keys,
-    preferTilt: !finger && isCoarse() && !!tilt.input,
+    preferTilt: !finger && isCoarse() && !!tiltInput(),
   });
   selected.jump = onFootJump(navigation.keysDown);
   if (presenting && ride.eject && vrJumpDown(sources)) {
@@ -994,7 +1010,7 @@ function pressNew() {
 
 function newHill(nextSeed) {
   // Lean is relative to how the phone is held at the start of each hill.
-  tilt.resetLean();
+  tilt.resetNeutral();
   const explicit = arguments.length > 0 && Number.isFinite(Number(nextSeed));
   if (!explicit && partyMode) leaveParty("Left the room.", { tellHost: true });
   const numeric = Number.isFinite(Number(nextSeed))

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { planCues } from "../src/audio.js";
+import { createAudio } from "@rb/arcade/audio";
+import { createRideAudioAdapter, planCues } from "../src/audio.js";
 
 function ride(extra = {}) {
   return {
@@ -165,4 +166,68 @@ test("a new hill does not replay the previous crash", () => {
   const next = planCues(crashed.memory, frame({ seed: 2, ride: ride() }));
   assert.equal(next.ones.length, 0);
   assert.equal(next.loops.roll, 0);
+});
+
+// A Web Audio double: enough nodes for Arcade's adapter and the loop bed.
+function fakeContext() {
+  const nodes = [];
+  const param = () => ({ value: 1, targets: [], setTargetAtTime(v) { this.targets.push(v); this.value = v; }, setValueAtTime() {}, linearRampToValueAtTime() {} });
+  const node = (kind) => {
+    const made = { kind, gain: param(), connected: [], disconnected: 0, connect(to) { this.connected.push(to); }, disconnect() { this.disconnected += 1; } };
+    nodes.push(made);
+    return made;
+  };
+  return {
+    nodes,
+    state: "running",
+    currentTime: 0,
+    destination: { kind: "destination" },
+    resume: async () => {},
+    createGain: () => node("gain"),
+    createBufferSource() {
+      const source = node("source");
+      source.playbackRate = { value: 1 };
+      source.started = 0;
+      source.stopped = 0;
+      source.start = () => { source.started += 1; };
+      source.stop = () => { source.stopped += 1; };
+      return source;
+    },
+  };
+}
+
+test("a loop bed plays through Arcade's lifecycle and stops cleanly", async (t) => {
+  const context = fakeContext();
+  const buffers = { roll: { duration: 4 }, bump: { duration: 0.3 } };
+  const audio = createAudio(createRideAudioAdapter({ context, getBuffer: (name) => buffers[name] }), { gain: 0.5 });
+  assert.equal(await audio.unlock(), true);
+  const bed = await audio.play("roll", { loop: true, gain: 0.4 });
+  // The bed re-arms itself on a timer; stop it whatever an assertion does.
+  t.after(() => audio.stopAll());
+  const sources = () => context.nodes.filter((n) => n.kind === "source");
+  assert.equal(sources().length, 1, "the bed starts one pass");
+  assert.equal(sources()[0].started, 1);
+  // Arcade's one-shot output joins the destination first; the bed's level node is the last.
+  const level = context.nodes.filter((n) => n.kind === "gain" && n.connected.includes(context.destination)).at(-1);
+  assert.ok(Math.abs(level.gain.value - 0.2) < 1e-9, `master times local: ${level.gain.value}`);
+  bed.setGain(0.2);
+  assert.ok(Math.abs(level.gain.value - 0.1) < 1e-9);
+  audio.setMuted(true);
+  assert.equal(level.gain.value, 0);
+  audio.setMuted(false);
+  await audio.play("bump", { gain: 0.6 });
+  assert.equal(audio.state.activeVoices, 2);
+  audio.stopAll();
+  assert.equal(audio.state.activeVoices, 0);
+  assert.equal(sources()[0].stopped >= 2, true, "the scheduled stop and the stop on stopAll");
+  assert.equal(level.disconnected, 1, "the bed let go of its level node");
+  await audio.dispose();
+});
+
+test("a missing loop clip fails the play instead of starting silence", async () => {
+  const context = fakeContext();
+  const audio = createAudio(createRideAudioAdapter({ context, getBuffer: () => null }));
+  await assert.rejects(audio.play("wind", { loop: true, gain: 0.2 }), /missing buffer wind/);
+  assert.equal(audio.state.activeVoices, 0);
+  await audio.dispose();
 });

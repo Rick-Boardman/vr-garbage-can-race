@@ -52,7 +52,30 @@ import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb
 
 Halo's contract is that the application owns the world, the rules, and the persistence. This repo is that application: the hill, the town, the can, and the score. The best distance for the browser session is stored in `sessionStorage`.
 
-Peer versions match Halo 0.2.0: `three` 0.160.1 and `troika-three-text` 0.52.4. The page loads them through an import map so there is one Three.js instance.
+Peer versions match Halo: `three` 0.160.1 and `troika-three-text` 0.52.4. The page loads them through an import map so there is one Three.js instance.
+
+## Shared library pins
+
+`package.json` pins `@rb/halo` at `v0.2.8` and `@rb/arcade` at `v0.5.0`. Halo v0.2.8 is the
+release with the settings window (v0.2.6), the path-camera HUD (v0.2.7) and device input
+(v0.2.8) that still peers Three.js 0.160.1. `index.html`'s import map names each subpath
+(`@rb/halo/hud`, `/input`, `/ui`, `/curve-surface`, and `@rb/arcade/audio`, `/presentation`,
+`/course`, `/racing`, `/entry`) inside `node_modules`.
+
+| Module | What it replaced here |
+| --- | --- |
+| `@rb/halo/hud` path-camera mount and panels | `src/vr-chrome.js`: the VR HUD mount and the side columns |
+| `@rb/halo/ui` settings window | the controls and painting in `src/graphics-panel.js`, which now holds only the palette, the Extreme crashes row and the top-right placement |
+| `@rb/halo/input` | the stick, button, hands and orientation readers in `src/input.js`, and `src/tilt.js`. The ride's scales, deadzones, wording and precedence stay in `src/input.js` |
+| `@rb/arcade/course` | the travel frame and nose yaw in `src/course.js`. The endless hill, districts and forks stay |
+| `@rb/arcade/presentation` | `src/name-tag.js`, the remote-rider lifecycle in `src/remotes.js`, and the look key in `src/looks.js`. Wardrobe data stays |
+| `@rb/arcade/audio` | the unlock, master gain and voice lifecycle in `src/audio.js`. Clips, the cue plan and the crossfading loop bed stay |
+
+Not replaced: `src/road.js` (Halo's road surface stitches a closed curve with the opposite
+winding, and Arcade's surface builds only its own courses), `separatePack` in `src/party.js`
+(rider collision is physics, which `@rb/arcade/racing` leaves to the game; the endless hill has
+no laps or finish to rank), and the Magna entry in `src/party.js` (`@rb/arcade/entry` treats a
+failed arrival as terminal, while this game offers a retry slot). Those are follow-up tickets.
 
 ## Run
 
@@ -134,7 +157,7 @@ npm run check
 npm test
 ```
 
-`npm run check` (`scripts/check-imports.mjs`) fails if a source imports a `node_modules` path or a sibling checkout, or if Halo is not a pinned release tag reached through the import map.
+`npm run check` (`scripts/check-imports.mjs`) fails if a source imports a `node_modules` path or a sibling checkout, or if Halo or Arcade is not a pinned release tag reached through the import map.
 
 Tests in `tests/` cover the hill, controls, collisions, VR rig, HUD chat and
 Magna handoff/arrival lifecycle, including stale snapshots and disposal.
@@ -149,7 +172,7 @@ Magna handoff/arrival lifecycle, including stale snapshots and disposal.
 | `src/course.js` | Seeded hill, districts, times of day |
 | `src/town.js` | Chunks, buildings, cars, people, potholes |
 | `src/drive.js` | Speed, steering, crashes, near misses |
-| `src/input.js` | Keys, controller height, phone tilt |
+| `src/input.js` | The ride's mapping of keys, sticks, controller height and phone tilt (devices read through Halo) |
 | `src/game-ui.js` | Pinned Magna lobby integration, solo entry and game chrome |
 | `src/dresser.js` | Game-owned rider/can styling and preview |
 | `src/party.js` | Stick/pose relay and handoff-to-Halo chat adapter |

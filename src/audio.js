@@ -1,5 +1,11 @@
 // Clips in /audio were generated with Stable Audio 3 Medium.
 // The mix stays quiet under the street: a bed, then one-shots on contact.
+// Arcade's audio module (`@rb/arcade/audio`) owns the lifecycle: unlock from a
+// gesture, master gain, voices, stopping and disposal. The game owns the clips,
+// the cue plan and the crossfading loop bed, which sits behind Arcade's
+// custom-adapter interface.
+
+import { createAudio, createWebAudioAdapter } from "@rb/arcade/audio";
 
 const CLIPS = {
   soundtrack: "audio/soundtrack.ogg",
@@ -263,10 +269,16 @@ function loudest(ones) {
   return [...best.values()];
 }
 
-function LoopBed(ctx, buffer, gain) {
+// A loop that crossfades into its own next pass, so a clip without a seamless
+// tail still loops without a click. Its level follows setGain with a short
+// glide, as the bed always has.
+function LoopBed(ctx, buffer, output, gain) {
   this.ctx = ctx;
   this.buffer = buffer;
-  this.gain = gain;
+  this.gain = ctx.createGain();
+  this.gain.gain.value = 0;
+  this.gain.connect(output);
+  this.level = gain;
   this.fade = Math.min(1.5, Math.max(0.25, buffer.duration * 0.12));
   this.timer = 0;
   this.live = [];
@@ -276,7 +288,13 @@ function LoopBed(ctx, buffer, gain) {
 LoopBed.prototype.start = function start() {
   if (this.armed) return;
   this.armed = true;
+  this.setGain(this.level);
   this.spawn(this.ctx.currentTime + 0.02);
+};
+
+LoopBed.prototype.setGain = function setGain(level) {
+  this.level = level;
+  this.gain.gain.setTargetAtTime(level, this.ctx.currentTime, 0.08);
 };
 
 LoopBed.prototype.spawn = function spawn(when) {
@@ -297,6 +315,8 @@ LoopBed.prototype.spawn = function spawn(when) {
   source.onended = () => {
     const index = this.live.indexOf(source);
     if (index >= 0) this.live.splice(index, 1);
+    source.disconnect();
+    fade.disconnect();
   };
   const nextAt = when + duration - fadeTime;
   const wait = Math.max(0, (nextAt - this.ctx.currentTime) * 1000 - 40);
@@ -306,6 +326,46 @@ LoopBed.prototype.spawn = function spawn(when) {
     this.spawn(Math.max(this.ctx.currentTime + 0.01, nextAt));
   }, wait);
 };
+
+LoopBed.prototype.stop = function stop() {
+  this.armed = false;
+  clearTimeout(this.timer);
+  this.timer = 0;
+  for (const source of this.live.splice(0)) {
+    source.onended = null;
+    source.stop();
+    source.disconnect();
+  }
+};
+
+LoopBed.prototype.dispose = function dispose() {
+  this.gain.disconnect();
+};
+
+// Arcade adapter: one-shots through Arcade's Web Audio adapter, loops as beds.
+// A bed never ends on its own, so onEnded is never called for a loop.
+export function createRideAudioAdapter({ context, getBuffer }) {
+  const shots = createWebAudioAdapter({ context, getBuffer });
+  return {
+    unlock: () => shots.unlock(),
+    createVoice(sound, options) {
+      if (!options.loop) return shots.createVoice(sound, options);
+      const buffer = getBuffer(sound);
+      if (!buffer) throw new Error(`[gcr:audio] missing buffer ${String(sound)}`);
+      const bed = new LoopBed(context, buffer, context.destination, options.gain);
+      return {
+        start() {
+          if (context.state !== "running") throw new Error("[gcr:audio] context is not running");
+          bed.start();
+        },
+        setGain: (value) => bed.setGain(value),
+        stop: () => bed.stop(),
+        dispose: () => bed.dispose(),
+      };
+    },
+    dispose: () => shots.dispose(),
+  };
+}
 
 export function createSound() {
   const AudioCtx = globalThis.AudioContext || globalThis.webkitAudioContext;
@@ -328,27 +388,33 @@ export function createSound() {
   }
 
   const ctx = new AudioCtx();
-  const master = ctx.createGain();
-  master.gain.value = 0.9;
-  master.connect(ctx.destination);
   const buffers = {};
-  const beds = {};
-  const gains = {};
+  const audio = createAudio(
+    createRideAudioAdapter({ context: ctx, getBuffer: (name) => buffers[name] }),
+    { gain: 0.9 },
+  );
+  const loops = {};
   let memory = null;
   let loading = null;
   status.state = ctx.state;
 
+  function failed(what, error) {
+    const message = String(error && error.message ? error.message : error);
+    console.warn(`[gcr:audio] ${what}: ${message}`);
+    return message;
+  }
+
+  // Called straight from the gesture, before anything awaits.
   function unlock() {
     status.gestures += 1;
-    const job = ctx.resume();
-    if (job && typeof job.then === "function") {
-      job.then(() => {
-        status.state = ctx.state;
-        status.unlocked = ctx.state === "running";
-      }).catch((error) => {
-        status.resumeError = String(error && error.message ? error.message : error);
-      });
-    }
+    audio.unlock().then(() => {
+      status.resumeError = "";
+    }).catch((error) => {
+      status.resumeError = failed("unlock", error);
+    }).finally(() => {
+      status.state = ctx.state;
+      status.unlocked = ctx.state === "running";
+    });
     status.state = ctx.state;
     ensureLoaded();
   }
@@ -359,24 +425,34 @@ export function createSound() {
       try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(String(response.status));
-        const audio = await ctx.decodeAudioData(await response.arrayBuffer());
-        buffers[name] = audio;
+        const decoded = await ctx.decodeAudioData(await response.arrayBuffer());
+        buffers[name] = decoded;
         status.loaded += 1;
       } catch {
         status.missing.push(name);
       }
     })).then(() => {
-      for (const name of LOOPS) {
-        if (!buffers[name]) continue;
-        const gain = ctx.createGain();
-        gain.gain.value = 0;
-        gain.connect(master);
-        gains[name] = gain;
-        beds[name] = new LoopBed(ctx, buffers[name], gain);
-      }
       status.state = ctx.state;
     });
     return loading;
+  }
+
+  // A loop starts the first time its level is heard, then only changes level.
+  function setLoop(name, level) {
+    const loop = loops[name];
+    if (loop?.voice) {
+      loop.voice.setGain(level);
+      return;
+    }
+    if (loop || level <= 0.004 || !buffers[name]) return;
+    const pending = { voice: null };
+    loops[name] = pending;
+    audio.play(name, { loop: true, gain: level }).then((voice) => {
+      pending.voice = voice;
+    }).catch((error) => {
+      if (loops[name] === pending) delete loops[name];
+      failed(`loop ${name}`, error);
+    });
   }
 
   window.addEventListener("pointerdown", unlock);
@@ -390,7 +466,7 @@ export function createSound() {
     setMaster(level) {
       const next = Number(level);
       if (!Number.isFinite(next)) return;
-      master.gain.value = Math.min(1, Math.max(0, next));
+      audio.setGain(Math.min(1, Math.max(0, next)));
     },
     update(frame) {
       status.state = ctx.state;
@@ -402,24 +478,10 @@ export function createSound() {
         loops: plan.loops,
         ones: plan.ones.map((one) => one.name),
       };
-      for (const name of LOOPS) {
-        const bed = beds[name];
-        const gain = gains[name];
-        if (!bed || !gain) continue;
-        const level = plan.loops[name] || 0;
-        if (level > 0.004) bed.start();
-        gain.gain.setTargetAtTime(level, ctx.currentTime, 0.08);
-      }
+      for (const name of LOOPS) setLoop(name, plan.loops[name] || 0);
       for (const one of plan.ones) {
-        const buffer = buffers[one.name];
-        if (!buffer || one.gain <= 0.02) continue;
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        const gain = ctx.createGain();
-        gain.gain.value = one.gain;
-        source.connect(gain);
-        gain.connect(master);
-        source.start();
+        if (!buffers[one.name] || one.gain <= 0.02) continue;
+        audio.play(one.name, { gain: Math.min(1, one.gain) }).catch((error) => failed(`cue ${one.name}`, error));
       }
     },
     status: () => status,

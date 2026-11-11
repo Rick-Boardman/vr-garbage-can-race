@@ -12,9 +12,8 @@ import {
   selectRideInput,
   stickFromSources,
   vrJumpDown,
-  vrStickPair,
 } from "../src/input.js";
-import { placeHudMount } from "../src/vr-chrome.js";
+import { createHudPathCameraMount } from "@rb/halo/hud";
 import { VIEWS, referencePitch, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
@@ -43,20 +42,7 @@ test("the left stick walks and strafes, and the ride lean still wins in the can"
   assert.equal(side.strafe, 1);
   assert.equal(inputFromVrStick(0.1, -0.1).throttle, 0);
 
-  const quest = vrStickPair([0, 0, 1, 0], null);
-  assert.equal(quest.index, 2);
-  assert.equal(quest.lock, true);
-  const touch = vrStickPair([0, -1, 0, 0], null);
-  assert.equal(touch.index, 0);
-  assert.equal(touch.lock, true);
-  const quiet = vrStickPair([0.02, 0.01, 0.01, 0.02], null);
-  assert.equal(quiet.index, 0);
-  assert.equal(quiet.lock, false);
-  assert.equal(vrStickPair([0.4, 0, 0.9, 0], 0).index, 0);
-  const relock = vrStickPair([0, 0, 0, -1], 0);
-  assert.equal(relock.index, 2);
-  assert.equal(relock.lock, true);
-
+  // The pair lock itself is Halo's stickPair, tested there.
   const locks = new Map();
   const leftPad = { id: "", axes: [0, -1, 0, 0] };
   const rightPad = { id: "oculus touch right", axes: [1, 0] };
@@ -236,12 +222,12 @@ test("a headset turned around in the room still looks down the road", () => {
   head.add(cam);
 
   const expected = new THREE.Vector3(0, 0, -1);
-  const mount = new THREE.Group();
   const hud = new THREE.Group();
   const hudQuat = new THREE.Quaternion();
   const panelDir = new THREE.Vector3();
-  pitchNode.add(mount);
+  pitchNode.add(hud);
   hud.position.set(0.35, 1.45, -0.2);
+  const mount = createHudPathCameraMount({ THREE, renderer: { xr: { isPresenting: true } }, hud: { root: hud } });
   let eye = null;
   for (const turned of [0, Math.PI, -1.4, 2.2]) {
     for (const posePitch of [0, 0.35]) {
@@ -284,7 +270,7 @@ test("a headset turned around in the room still looks down the road", () => {
       // The mount aims the sphere at the locked look for every room yaw.
       // The root stays at rotation 0, which is what Halo raycasts.
       const eyePitch = viewPitch + referencePitch(pose.x, pose.y, pose.z, pose.w);
-      placeHudMount(mount, hud, py, eyePitch);
+      mount.update({ yaw: py, pitch: eyePitch });
       player.updateMatrixWorld(true);
       assert.equal(hud.rotation.y, 0);
       hud.getWorldQuaternion(hudQuat);
