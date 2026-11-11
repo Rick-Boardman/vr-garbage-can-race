@@ -14,8 +14,8 @@ import {
   onFootJump,
   onFootSteer,
   selectRideInput,
-  tiltAxes,
 } from "../src/input.js";
+import { orientationAxes } from "@rb/halo/input";
 import { createRideState, restCanTilt, stepRide, walkerForward } from "../src/drive.js";
 import { canGroundClearance, createRider } from "../src/rider.js";
 import { BUILDING_SETBACK, DISTRICT_LENGTH, START_S } from "../src/constants.js";
@@ -259,9 +259,9 @@ test("hands, tilt, and keys steer with the documented signs", () => {
   assert.ok(brake.throttle < 0);
 
   // Full per-angle coverage is in tests/tilt.test.mjs.
-  const portrait = tiltAxes({ beta: 0, gamma: 18, screenAngle: 0 });
-  assert.ok(Math.abs(portrait.steerDeg - 18) < 1e-9);
-  const tilted = inputFromTilt({ steerDeg: 24, leanDeg: 22, neutralSteer: 0, neutralLean: 0 });
+  const portrait = orientationAxes({ beta: 0, gamma: 18, screenAngle: 0 });
+  assert.ok(Math.abs(portrait.rollDeg - 18) < 1e-9);
+  const tilted = inputFromTilt({ roll: 24, pitch: 22 });
   assert.ok(tilted.steer > 0.9);
   assert.ok(tilted.throttle > 0.9);
 
@@ -850,7 +850,7 @@ test("on foot, a finger dragged up walks forward and does not steer", () => {
   assert.equal(footDragStick({ ejected: true, dragging: false, touch: true, pitch: -0.38 }), null);
   assert.equal(footDragStick({ ejected: false, dragging: true, touch: true, pitch: -0.38 }), null);
 
-  const tilt = inputFromTilt({ steerDeg: 20, leanDeg: 20, neutralSteer: 0, neutralLean: 0 });
+  const tilt = inputFromTilt({ roll: 20, pitch: 20 });
   const held = selectRideInput({
     presenting: false,
     tilt: null,

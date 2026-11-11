@@ -43,7 +43,7 @@ import { checkRibbonFacesUp } from "./road.js";
 import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
-import { createTilt } from "./tilt.js";
+import { createOrientationInput } from "@rb/halo/input";
 import {
   createHudPathCameraMount,
   createHudPathCameraPanels,
@@ -53,6 +53,7 @@ import {
   footDragStick,
   footStrafe,
   inputFromHands,
+  inputFromTilt,
   inputFromKeys,
   inputFromLook,
   inputFromVrStick,
@@ -61,6 +62,8 @@ import {
   onFootSteer,
   selectRideInput,
   stickFromSources,
+  TILT_LOG,
+  TILT_MESSAGES,
   vrJumpDown,
 } from "./input.js";
 
@@ -268,21 +271,23 @@ function poseXFor(sources) {
   return xs;
 }
 
-const tilt = createTilt({
+// Phone tilt through Halo's orientation adapter. Lean is relative to how the
+// phone is held at the first reading of each hill; level is level for steer.
+const tilt = createOrientationInput({
   win: window,
   status: { get: () => lobby.getStatus(), set: (text) => lobby.setStatus(text) },
+  messages: TILT_MESSAGES,
+  logPrefix: TILT_LOG,
 });
+function tiltInput() {
+  return inputFromTilt(tilt.axes);
+}
 
 window.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "touch") dragIsTouch = true;
   else if (event.pointerType === "mouse" || event.pointerType === "pen") dragIsTouch = false;
 });
-for (const type of ["touchend", "click", "pointerup"]) {
-  window.addEventListener(type, (event) => {
-    if (type === "pointerup" && event.pointerType === "mouse") return;
-    if (isCoarse()) tilt.enable();
-  }, { capture: true });
-}
+tilt.bindGestures(window, { when: () => isCoarse() });
 
 function releaseHeldKey(event) {
   const keys = navigation?.keysDown;
@@ -945,7 +950,7 @@ function sampleInput(presenting) {
     touch: dragIsTouch,
     pitch: look.getPitch(),
   });
-  const lookSteer = !finger && isCoarse() && !tilt.input && !presenting
+  const lookSteer = !finger && isCoarse() && !tiltInput() && !presenting
     ? inputFromLook(yawOffset, look.getPitch())
     : null;
   const keys = inputFromKeys({
@@ -971,9 +976,9 @@ function sampleInput(presenting) {
     hands: presenting ? readHands(controllers, camera) : null,
     vrStick,
     vrTurn: rightStick ? rightStick.x : 0,
-    tilt: finger ? null : tilt.input,
+    tilt: finger ? null : tiltInput(),
     keys,
-    preferTilt: !finger && isCoarse() && !!tilt.input,
+    preferTilt: !finger && isCoarse() && !!tiltInput(),
   });
   selected.jump = onFootJump(navigation.keysDown);
   if (presenting && ride.eject && vrJumpDown(sources)) {
@@ -1004,7 +1009,7 @@ function pressNew() {
 
 function newHill(nextSeed) {
   // Lean is relative to how the phone is held at the start of each hill.
-  tilt.resetLean();
+  tilt.resetNeutral();
   const explicit = arguments.length > 0 && Number.isFinite(Number(nextSeed));
   if (!explicit && partyMode) leaveParty("Left the room.", { tellHost: true });
   const numeric = Number.isFinite(Number(nextSeed))

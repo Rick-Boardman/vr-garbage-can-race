@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { inputFromTilt, requestTilt, tiltAxes, TILT_LOG } from "../src/input.js";
-import { createTilt, NO_READINGS } from "../src/tilt.js";
+import { createOrientationInput, orientationAxes, requestOrientationPermission } from "@rb/halo/input";
+import { inputFromTilt, NO_READINGS, TILT_LOG, TILT_MESSAGES } from "../src/input.js";
+
+// Halo reads the sensor; these tests hold the ride's wording and mapping to it.
+function tiltAxes(raw) {
+  const axes = orientationAxes(raw);
+  return { steerDeg: axes.rollDeg, leanDeg: axes.pitchDeg };
+}
+function ride({ steerDeg, leanDeg, neutralLean = 0 }) {
+  return inputFromTilt({ roll: steerDeg, pitch: leanDeg - neutralLean });
+}
+function requestTilt(options) {
+  return requestOrientationPermission({ ...options, messages: TILT_MESSAGES });
+}
 
 const DEG = Math.PI / 180;
 
@@ -75,22 +87,23 @@ test("tilting from the neutral hold steers and throttles", () => {
   const neutral = tiltAxes(reading(-40, 0, 90)).leanDeg;
   for (const angle of [0, 90, 180, 270]) {
     const right = tiltAxes(reading(-40, 24, angle));
-    const ride = inputFromTilt({ ...right, neutralLean: neutral });
-    assert.ok(ride.steer > 0.99, `angle ${angle} steer ${ride.steer}`);
-    assert.equal(ride.throttle, 0);
-    const forward = inputFromTilt({ ...tiltAxes(reading(-18, 0, angle)), neutralLean: neutral });
+    const turn = ride({ ...right, neutralLean: neutral });
+    assert.ok(turn.steer > 0.99, `angle ${angle} steer ${turn.steer}`);
+    assert.equal(turn.throttle, 0);
+    const forward = ride({ ...tiltAxes(reading(-18, 0, angle)), neutralLean: neutral });
     assert.ok(forward.throttle > 0.99, `angle ${angle} tip away ${forward.throttle}`);
-    const back = inputFromTilt({ ...tiltAxes(reading(-62, 0, angle)), neutralLean: neutral });
+    const back = ride({ ...tiltAxes(reading(-62, 0, angle)), neutralLean: neutral });
     assert.ok(back.throttle < -0.99, `angle ${angle} tip back ${back.throttle}`);
-    const left = inputFromTilt({ ...tiltAxes(reading(-40, -12, angle)), neutralLean: neutral });
+    const left = ride({ ...tiltAxes(reading(-40, -12, angle)), neutralLean: neutral });
     assert.ok(left.steer < -0.4, `angle ${angle} left ${left.steer}`);
   }
 });
 
 test("a reading without beta or gamma is no tilt input", () => {
   const axes = tiltAxes({ beta: null, gamma: null, screenAngle: 0 });
-  assert.equal(inputFromTilt(axes), null);
-  assert.equal(inputFromTilt({ steerDeg: 1, leanDeg: 1, neutralLean: Number.NaN }), null);
+  assert.equal(ride(axes), null);
+  assert.equal(ride({ steerDeg: 1, leanDeg: 1, neutralLean: Number.NaN }), null);
+  assert.equal(inputFromTilt(null), null);
 });
 
 test("motion permission: granted, refused, no gesture, insecure, unsupported", async () => {
@@ -147,11 +160,19 @@ function harness({ requestPermission, statusText = "" } = {}) {
     DeviceOrientationEvent: orientationEvent,
     screen: { orientation: { angle: 0 } },
     addEventListener(type, fn) { listeners[type] = fn; },
+    removeEventListener(type) { delete listeners[type]; },
   };
   const lobby = { text: statusText };
   const status = { get: () => lobby.text, set: (text) => { lobby.text = text; } };
   const log = { warn: (line) => logs.push(line), info: (line) => logs.push(line) };
-  const tilt = createTilt({ win, status, log, setTimer: (fn) => timers.push(fn) });
+  const orientation = createOrientationInput({
+    win, status, log, messages: TILT_MESSAGES, logPrefix: TILT_LOG, setTimer: (fn) => timers.push(fn),
+  });
+  const tilt = {
+    enable: () => orientation.enable(),
+    get note() { return orientation.note; },
+    get input() { return inputFromTilt(orientation.axes); },
+  };
   const orient = (beta, gamma) => listeners.deviceorientation({ beta, gamma });
   return { tilt, lobby, timers, logs, listeners, orient };
 }

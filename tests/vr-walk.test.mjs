@@ -12,7 +12,6 @@ import {
   selectRideInput,
   stickFromSources,
   vrJumpDown,
-  vrStickPair,
 } from "../src/input.js";
 import { createHudPathCameraMount } from "@rb/halo/hud";
 import { VIEWS, referencePitch, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
@@ -43,20 +42,7 @@ test("the left stick walks and strafes, and the ride lean still wins in the can"
   assert.equal(side.strafe, 1);
   assert.equal(inputFromVrStick(0.1, -0.1).throttle, 0);
 
-  const quest = vrStickPair([0, 0, 1, 0], null);
-  assert.equal(quest.index, 2);
-  assert.equal(quest.lock, true);
-  const touch = vrStickPair([0, -1, 0, 0], null);
-  assert.equal(touch.index, 0);
-  assert.equal(touch.lock, true);
-  const quiet = vrStickPair([0.02, 0.01, 0.01, 0.02], null);
-  assert.equal(quiet.index, 0);
-  assert.equal(quiet.lock, false);
-  assert.equal(vrStickPair([0.4, 0, 0.9, 0], 0).index, 0);
-  const relock = vrStickPair([0, 0, 0, -1], 0);
-  assert.equal(relock.index, 2);
-  assert.equal(relock.lock, true);
-
+  // The pair lock itself is Halo's stickPair, tested there.
   const locks = new Map();
   const leftPad = { id: "", axes: [0, -1, 0, 0] };
   const rightPad = { id: "oculus touch right", axes: [1, 0] };

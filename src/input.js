@@ -4,7 +4,16 @@
 // no move key down, throttle stays 0 so a stop stays a stop.
 // VR: the lower hand steers that way. Both hands below the head speed up;
 // both raised lean back and slow down.
-// Phone tilt: gravity from beta/gamma, in screen axes for the screen angle.
+// Phone tilt: Halo's orientation adapter reports roll and pitch in screen axes.
+//
+// Halo (`@rb/halo/input`) owns reading the devices: held keys, XR sticks and
+// buttons, controller heights and phone orientation with its permission. This
+// file is the ride's mapping of those readings: which key steers, the scales,
+// deadzones and the precedence between devices.
+
+import { anyKeyDown, buttonDown, handsAxes, keyAxis, mapAxis } from "@rb/halo/input";
+
+export { stickFromSources } from "@rb/halo/input";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -17,26 +26,18 @@ function deadzone(value, threshold) {
 // On foot, Q turns left and E turns right. A and D are strafe, not added here,
 // or they would also steer the can while riding. Space jumps.
 export function onFootSteer(steer, keys) {
-  const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
-  let next = steer || 0;
-  if (down("Q")) next -= 1;
-  if (down("E")) next += 1;
-  return clamp(next, -1, 1);
+  return clamp((steer || 0) + keyAxis(keys, { negative: ["Q"], positive: ["E"] }), -1, 1);
 }
 
 export function onFootJump(keys) {
-  const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
-  return down(" ") || down("Space");
+  return anyKeyDown(keys, [" ", "Space"]);
 }
 
 export function inputFromKeys({ keys, autoWalk = false, lookSteer = null }) {
-  const down = keys instanceof Set ? (code) => keys.has(code) : (code) => !!keys?.[code];
-  let steer = 0;
-  if (down("A")) steer -= 1;
-  if (down("D")) steer += 1;
+  let steer = keyAxis(keys, { negative: ["A"], positive: ["D"] });
   let throttle = 0;
-  if (down("W") || down("Shift") || autoWalk) throttle += 1;
-  if (down("S")) throttle -= 1;
+  if (anyKeyDown(keys, ["W", "Shift"]) || autoWalk) throttle += 1;
+  if (anyKeyDown(keys, ["S"])) throttle -= 1;
   if (lookSteer) {
     if (steer === 0) steer = lookSteer.steer;
     if (throttle === 0) throttle = lookSteer.throttle;
@@ -57,11 +58,11 @@ export function inputFromLook(yawOffset, pitch) {
 }
 
 export function inputFromHands({ leftY, rightY, headY }) {
-  if (![leftY, rightY, headY].every(Number.isFinite)) return null;
+  const hands = handsAxes({ leftY, rightY, headY });
+  if (!hands) return null;
   // Left controller lower than the right → negative steer.
-  const steer = deadzone(clamp((leftY - rightY) / 0.22, -1, 1), 0.08);
-  const drop = headY - (leftY + rightY) * 0.5;
-  const throttle = deadzone(clamp((drop - 0.32) / 0.28, -1, 1), 0.06);
+  const steer = mapAxis(hands.split, { scale: 1 / 0.22, deadzone: 0.08 });
+  const throttle = mapAxis(hands.drop, { offset: -0.32, scale: 1 / 0.28, deadzone: 0.06 });
   return { steer, throttle };
 }
 
@@ -88,143 +89,9 @@ export function inputFromVrStick(x, y) {
   };
 }
 
-function stickMag(axes, index) {
-  return Math.hypot(Number(axes[index]) || 0, Number(axes[index + 1]) || 0);
-}
-
-// Quest may put the thumbstick on axes 0,1 or 2,3. The first decisive
-// push locks the pair. A locked pair that has gone quiet yields to a
-// decisive push on the other pair, so a stale lock cannot hide the stick.
-export function vrStickPair(axes, locked = null) {
-  if (!axes || axes.length < 2) return null;
-  const choices = axes.length >= 4 ? [0, 2] : [0];
-  if ((locked === 0 || locked === 2) && choices.includes(locked)) {
-    const lockedMag = stickMag(axes, locked);
-    let other = null;
-    let otherMag = -1;
-    for (const index of choices) {
-      if (index === locked) continue;
-      const mag = stickMag(axes, index);
-      if (mag > otherMag) {
-        otherMag = mag;
-        other = index;
-      }
-    }
-    if (other != null && lockedMag < 0.15 && otherMag >= 0.35) {
-      return { index: other, lock: true };
-    }
-    return { index: locked, lock: false };
-  }
-  let best = 0;
-  let bestMag = -1;
-  for (const index of choices) {
-    const mag = stickMag(axes, index);
-    if (mag > bestMag) {
-      bestMag = mag;
-      best = index;
-    }
-  }
-  if (axes.length < 4) return { index: 0, lock: false };
-  if (bestMag >= 0.35) return { index: best, lock: true };
-  if (bestMag >= 0.15) return { index: best, lock: false };
-  return { index: 0, lock: false };
-}
-
-function handInId(id, handedness) {
-  const text = String(id || "").toLowerCase();
-  if (!text) return false;
-  if (handedness === "left") return /\bleft\b/.test(text);
-  if (handedness === "right") return /\bright\b/.test(text);
-  return false;
-}
-
-function poseHands(sources, poseX) {
-  if (!poseX) return null;
-  const posed = [];
-  for (let i = 0; i < sources.length; i += 1) {
-    const source = sources[i];
-    if (String(source?.handedness || "")) continue;
-    if (!source?.gamepad?.axes || source.gamepad.axes.length < 2) continue;
-    const x = Number(poseX[i]);
-    if (!Number.isFinite(x)) continue;
-    posed.push({ source, x });
-  }
-  if (posed.length < 2) return null;
-  posed.sort((a, b) => a.x - b.x);
-  const left = posed[0];
-  const right = posed[posed.length - 1];
-  if (left.source.gamepad === right.source.gamepad) return null;
-  if (!(right.x - left.x >= 0.06)) return null;
-  return { left: left.source, right: right.source };
-}
-
-function readLockedStick(gamepad, locks) {
-  const pair = vrStickPair(gamepad.axes, locks?.get?.(gamepad) ?? null);
-  if (!pair) return null;
-  if (pair.lock) locks?.set?.(gamepad, pair.index);
-  const x = Number(gamepad.axes[pair.index]);
-  const y = Number(gamepad.axes[pair.index + 1]);
-  return {
-    x: Number.isFinite(x) ? x : 0,
-    y: Number.isFinite(y) ? y : 0,
-  };
-}
-
-function loudestStick(gamepads, locks) {
-  let best = null;
-  let bestMag = -1;
-  const seen = new Set();
-  for (const gamepad of gamepads) {
-    if (!gamepad || seen.has(gamepad)) continue;
-    seen.add(gamepad);
-    const reading = readLockedStick(gamepad, locks);
-    if (!reading) continue;
-    const mag = Math.hypot(reading.x, reading.y);
-    if (mag > bestMag) {
-      bestMag = mag;
-      best = reading;
-    }
-  }
-  return best ? { reading: best, mag: bestMag } : null;
-}
-
-// Handedness, then the gamepad id, then pose X when the runtime leaves
-// the hand blank. Two pads for one hand: the one actually deflected wins,
-// so a quiet duplicate cannot hide the stick.
-export function stickFromSources(sources, handedness, poseX = null, locks = null) {
-  const list = Array.from(sources || []);
-  if (handedness !== "left" && handedness !== "right") return null;
-  const pads = (pred) => {
-    const found = [];
-    for (const source of list) {
-      if (!pred(source)) continue;
-      const gamepad = source?.gamepad;
-      if (!gamepad?.axes || gamepad.axes.length < 2) continue;
-      found.push(gamepad);
-    }
-    return found;
-  };
-  let best = loudestStick(pads((source) => source?.handedness === handedness), locks);
-  if (best && best.mag >= 0.15) return best.reading;
-  const byId = loudestStick(pads((source) => handInId(source?.gamepad?.id, handedness)), locks);
-  if (byId && byId.mag > (best?.mag ?? -1)) best = byId;
-  if (best && best.mag >= 0.15) return best.reading;
-  const inferred = poseHands(list, poseX);
-  if (inferred?.[handedness]?.gamepad) {
-    const fromPose = loudestStick([inferred[handedness].gamepad], locks);
-    if (fromPose && fromPose.mag > (best?.mag ?? -1)) best = fromPose;
-  }
-  return best ? best.reading : null;
-}
-
-// A or X. The trigger is the HUD pointer, so button 0 does not jump.
+// A or X (button 4). The trigger is the HUD pointer, so button 0 does not jump.
 export function vrJumpDown(sources) {
-  if (!sources) return false;
-  for (const source of sources) {
-    const button = source?.gamepad?.buttons?.[4];
-    if (button?.pressed) return true;
-  }
-  return false;
+  return buttonDown(sources, 4);
 }
 
 // Head direction on the ground, as the face walkerForward already uses.
@@ -246,86 +113,28 @@ export function faceFromHead(headX, headZ, forward, right) {
 
 export const TILT_LOG = "[gcr:tilt]";
 
-const DEG = Math.PI / 180;
+export const NO_READINGS = "No motion readings came from this phone.\nTilt cannot steer. Drag to steer.";
 
-function wrapDeg(value) {
-  return ((((value + 180) % 360) + 360) % 360) - 180;
-}
+// The ride's wording for Halo's orientation adapter. Each is one or two lines
+// (split on a newline) for the STATUS window.
+export const TILT_MESSAGES = Object.freeze({
+  insecure: "Phone tilt needs https.\nOpen the game over https to steer by tilting.",
+  unsupported: "This browser has no motion sensor.\nDrag to steer.",
+  error: (name) => `Motion permission failed (${name}).\nTap the screen again to allow tilt.`,
+  denied: "Motion was refused, so tilt cannot steer.\nAllow motion for this site in the browser settings, then reload.",
+  noReadings: NO_READINGS,
+});
 
-// Gravity in screen axes, from DeviceOrientation's beta and gamma. Reading the
-// Euler angles straight wraps: near upright gamma jumps from 90 to -90 and beta
-// by 180, so a landscape phone flipped to full steer. The gravity vector does
-// not wrap. Down in device axes is (cosβ·sinγ, −sinβ, −cosβ·cosγ); the screen
-// angle turns device x/y into screen right/up (90: screen up is device +x).
-// steerDeg: right edge down is positive, the same flat or held like a wheel.
-// leanDeg: top tipped away from you is positive. Flat is 0, upright facing you −90.
-// Check: portrait beta 30 gamma 0 → steer 0, lean −30.
-//        landscape 90 beta 10 gamma −60 → steer 10, lean ≈ −60.
-export function tiltAxes({ beta, gamma, screenAngle = 0 }) {
-  const b = Number(beta);
-  const g = Number(gamma);
-  if (beta == null || gamma == null || !Number.isFinite(b) || !Number.isFinite(g)) {
-    return { steerDeg: NaN, leanDeg: NaN };
-  }
-  const angle = ((Math.round(Number(screenAngle) || 0) % 360) + 360) % 360;
-  const dx = Math.cos(b * DEG) * Math.sin(g * DEG);
-  const dy = -Math.sin(b * DEG);
-  const dz = -Math.cos(b * DEG) * Math.cos(g * DEG);
-  const c = Math.cos(angle * DEG);
-  const s = Math.sin(angle * DEG);
-  const sx = dx * c - dy * s;
-  const sy = dx * s + dy * c;
-  const steerDeg = Math.asin(Math.max(-1, Math.min(1, sx))) / DEG;
-  const leanDeg = -Math.atan2(-sy, -dz) / DEG;
-  return { steerDeg, leanDeg };
-}
-
-// Level is level, so steer has no neutral by default. Lean is relative to how
-// the phone was held when tilt started or the hill changed.
-export function inputFromTilt({ steerDeg, leanDeg, neutralSteer = 0, neutralLean = 0 }) {
-  if (![steerDeg, leanDeg, neutralSteer, neutralLean].every(Number.isFinite)) return null;
+// Halo's orientation axes, already relative to the neutral hold: roll is the
+// right edge of the screen down, pitch is the top tipped away. Level is level
+// for roll; pitch is relative to how the phone was held when the hill started.
+export function inputFromTilt(axes) {
+  const roll = axes?.roll;
+  const pitch = axes?.pitch;
+  if (![roll, pitch].every(Number.isFinite)) return null;
   return {
-    steer: deadzone(clamp(wrapDeg(steerDeg - neutralSteer) / 24, -1, 1), 0.07),
-    throttle: deadzone(clamp(wrapDeg(leanDeg - neutralLean) / 22, -1, 1), 0.07),
-  };
-}
-
-// Ask for the motion sensor. Call it from an activating gesture (touchend,
-// click, pointerup of a touch): iOS rejects requestPermission from a touch
-// pointerdown. Resolves { ok: true } or { ok: false, reason, message, retry }.
-// retry is true when a later gesture may still succeed (no activation yet).
-// A message is one or two lines (split on a newline) for the STATUS window.
-export async function requestTilt({ orientationEvent, secure }) {
-  if (secure === false) {
-    return {
-      ok: false,
-      reason: "insecure",
-      message: "Phone tilt needs https.\nOpen the game over https to steer by tilting.",
-      retry: false,
-    };
-  }
-  if (!orientationEvent) {
-    return { ok: false, reason: "unsupported", message: "This browser has no motion sensor.\nDrag to steer.", retry: false };
-  }
-  if (typeof orientationEvent.requestPermission !== "function") return { ok: true };
-  let result;
-  try {
-    result = await orientationEvent.requestPermission();
-  } catch (error) {
-    const name = error?.name || "Error";
-    return {
-      ok: false,
-      reason: "error",
-      message: `Motion permission failed (${name}).\nTap the screen again to allow tilt.`,
-      retry: true,
-    };
-  }
-  if (result === "granted") return { ok: true };
-  return {
-    ok: false,
-    reason: "denied",
-    message: "Motion was refused, so tilt cannot steer.\nAllow motion for this site in the browser settings, then reload.",
-    retry: false,
+    steer: mapAxis(roll, { scale: 1 / 24, deadzone: 0.07 }),
+    throttle: mapAxis(pitch, { scale: 1 / 22, deadzone: 0.07 }),
   };
 }
 
