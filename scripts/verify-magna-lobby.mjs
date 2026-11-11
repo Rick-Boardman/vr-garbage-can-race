@@ -22,8 +22,14 @@ const server = spawn(process.execPath, ["scripts/serve.mjs"], {
 let browser, releaseArrival, arrivalGate;
 const contexts = [], errors = [], evidence = [];
 const pass = message => { evidence.push(message); console.log(`PASS ${message}`); };
+// A browser error rejects every guarded wait at once, so a bootstrap failure (for example no WebGL
+// context) is reported when it happens instead of after a Connected or gate timeout.
+let failBrowser;
+const browserFailure = new Promise((_, reject) => { failBrowser = reject; });
+browserFailure.catch(() => {});
+const guard = promise => Promise.race([promise, browserFailure]);
+const waitGate = (page, gate) => guard(page.waitForFunction(value => window.__garbageCanRace?.getState().gate === value, gate));
 const state = page => page.evaluate(() => window.__garbageCanRace.getState());
-const waitGate = (page, gate) => page.waitForFunction(value => window.__garbageCanRace?.getState().gate === value, gate);
 const dir = ".scratchpad/magna-lobby-proof";
 await mkdir(dir, { recursive: true });
 try {
@@ -43,7 +49,10 @@ try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, extraHTTPHeaders: { "x-magna-site": site } });
     contexts.push(context);
     const page = await context.newPage(); pages.push(page);
-    page.on("pageerror", error => errors.push(error.message));
+    page.on("pageerror", error => {
+      errors.push(error.message);
+      failBrowser(new Error(`[gcr-lobby-proof] ${names[index]} browser error: ${error.message}`));
+    });
     // Read-only HUD instrumentation; the released game behavior is unchanged.
     await page.route("**/src/main.js", async route => {
       const response = await route.fetch();
@@ -54,7 +63,7 @@ try {
       await page.route("**/api/play/rooms/*/arrive", async route => { await arrivalGate; await route.continue(); });
     }
     await page.goto(`http://127.0.0.1:${port}/?seed=42`, { waitUntil: "domcontentloaded" });
-    await page.getByText("Connected", { exact: true }).waitFor();
+    await guard(page.getByText("Connected", { exact: true }).waitFor());
     await page.getByLabel("Name", { exact: true }).fill(names[index]);
     await page.getByRole("button", { name: "Save name", exact: true }).click();
     await page.getByRole("button", { name: "Open table", exact: true }).waitFor({ state: "visible" });
