@@ -52,13 +52,14 @@ import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb
 
 Halo's contract is that the application owns the world, the rules, and the persistence. This repo is that application: the hill, the town, the can, and the score. The best distance for the browser session is stored in `sessionStorage`.
 
-Peer versions match Halo: `three` 0.160.1 and `troika-three-text` 0.52.4. The page loads them through an import map so there is one Three.js instance.
+Peer versions match Halo: `three` 0.185.1 and `troika-three-text` 0.52.4. The page loads them through an import map so there is one Three.js instance.
 
 ## Shared library pins
 
-`package.json` pins `@rb/halo` at `v0.2.8` and `@rb/arcade` at `v0.5.0`. Halo v0.2.8 is the
-release with the settings window (v0.2.6), the path-camera HUD (v0.2.7) and device input
-(v0.2.8) that still peers Three.js 0.160.1. `index.html`'s import map names each subpath
+`package.json` pins `@rb/halo` at `v0.3.0` and `@rb/arcade` at `v0.5.0`. Halo v0.3.0 carries
+the settings window (v0.2.6), the path-camera HUD (v0.2.7) and device input (v0.2.8), and
+peers exactly Three.js 0.185.1. In 0.185 `BatchedMesh.addGeometry` returns a geometry id, so
+`src/props.js` takes each instance id from `addInstance`. `index.html`'s import map names each subpath
 (`@rb/halo/hud`, `/input`, `/ui`, `/curve-surface`, and `@rb/arcade/audio`, `/presentation`,
 `/course`, `/racing`, `/entry`) inside `node_modules`.
 
