@@ -71,12 +71,12 @@ peers exactly Three.js 0.185.1. In 0.185 `BatchedMesh.addGeometry` returns a geo
 | `@rb/arcade/course` | the travel frame and nose yaw in `src/course.js`. The endless hill, districts and forks stay |
 | `@rb/arcade/presentation` | `src/name-tag.js`, the remote-rider lifecycle in `src/remotes.js`, and the look key in `src/looks.js`. Wardrobe data stays |
 | `@rb/arcade/audio` | the unlock, master gain and voice lifecycle in `src/audio.js`. Clips, the cue plan and the crossfading loop bed stay |
+| `@rb/arcade/entry` | the chat watch, table reads, arrival and RIDERS chat adapter in `src/party.js`. The stick/pose relay socket stays |
 
 Not replaced: `src/road.js` (Halo's road surface stitches a closed curve with the opposite
 winding, and Arcade's surface builds only its own courses), `separatePack` in `src/party.js`
 (rider collision is physics, which `@rb/arcade/racing` leaves to the game; the endless hill has
-no laps or finish to rank), and the Magna entry in `src/party.js` (`@rb/arcade/entry` treats a
-failed arrival as terminal, while this game offers a retry slot). Those are follow-up tickets.
+no laps or finish to rank). Those are follow-up tickets.
 
 ## Run
 
@@ -104,8 +104,10 @@ hill and waits in a start lane. Desktop reports arrival once the scene and relay
 are ready. A headset must click Enter VR on the hill; arrival waits for the
 renderer to attach the immersive session. Magna publishes one `startsAt` only
 after all remaining seats report in. The HUD shows seated names and countdown;
-the same authorized table chat appears on desktop and in VR. The READY slot
-retries a failed arrival request. A missing instance policy refuses entry.
+the same authorized table chat appears on desktop and in VR. `@rb/arcade/entry`
+watches the table, reports arrival once and runs the countdown. A failed arrival
+is terminal: the rider gives up the seat and returns to the lobby with the reason.
+A missing instance policy refuses entry.
 
 `config/play-game.json` is the game registration to apply through Magna's
 `POST /api/play/admin/games` on each target site before publishing this version.
@@ -161,7 +163,7 @@ npm test
 `npm run check` (`scripts/check-imports.mjs`) fails if a source imports a `node_modules` path or a sibling checkout, or if Halo or Arcade is not a pinned release tag reached through the import map.
 
 Tests in `tests/` cover the hill, controls, collisions, VR rig, HUD chat and
-Magna handoff/arrival lifecycle, including stale snapshots and disposal.
+Magna handoff/arrival lifecycle through `@rb/arcade/entry`, terminal arrival failure and the relay.
 
 `npm run look` is an optional headless pass. It needs the `playwright` package and Chromium (`npx playwright install chromium`). It is not installed by `npm install`.
 
@@ -176,7 +178,7 @@ Magna handoff/arrival lifecycle, including stale snapshots and disposal.
 | `src/input.js` | The ride's mapping of keys, sticks, controller height and phone tilt (devices read through Halo) |
 | `src/game-ui.js` | Pinned Magna lobby integration, solo entry and game chrome |
 | `src/dresser.js` | Game-owned rider/can styling and preview |
-| `src/party.js` | Stick/pose relay and handoff-to-Halo chat adapter |
+| `src/party.js` | Stick/pose relay, rider contact and pose easing |
 | `src/frame.js` | One downhill basis for the can, cars, and people |
 | `scripts/serve.mjs` | Loopback static server |
 

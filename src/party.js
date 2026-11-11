@@ -471,68 +471,30 @@ function mixAngle(from, to, blend) {
   return start + turn * blend;
 }
 
+// The stick/pose relay for one table. Entry, table state, arrival and the
+// RIDERS chat come from @rb/arcade/entry over the same handoff; this socket
+// only carries the game's own sticks and poses (and the room events Magna
+// fans out on it).
 export function createPartyClient({ WebSocket: Socket = globalThis.WebSocket } = {}) {
-  let handoff = null, client = null, room = null, socket = null, stopChat = null;
-  let beat = null, generation = 0, tableRevision = 0, seq = 0, messages = [], status = "offline";
-  const relayListeners = new Set(), tableListeners = new Set(), chatListeners = new Set();
-  const emitChat = () => {
-    const view = { messages, status, watching: room?.slots?.length || 0, hasMore: false };
-    for (const listener of chatListeners) listener(view);
-  };
+  let handoff = null, client = null, room = null, socket = null;
+  let beat = null, generation = 0, seq = 0;
+  const relayListeners = new Set();
   const emit = event => { for (const listener of relayListeners) listener(event); };
-  function adopt(table) {
-    tableRevision++;
-    room = table;
-    emitChat();
-    for (const listener of tableListeners) listener(table);
-  }
-  function remember(message) {
-    if (!message?.id || messages.some(row => row.id === message.id)) return;
-    messages = [...messages, message].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).slice(-200);
-    emitChat();
-  }
   function stop() {
     generation++;
-    stopChat?.(); stopChat = null;
     clearInterval(beat); beat = null;
     const previous = socket; socket = null;
     previous?.close();
-    handoff = null; client = null; room = null; messages = []; status = "offline";
-    emitChat();
+    handoff = null; client = null; room = null;
   }
   async function connect(next, playClient) {
     stop();
     const current = generation;
-    handoff = next; client = playClient; room = next.table; status = "connecting";
-    // Subscribe before reading history/state, so arrival/countdown events cannot be lost.
-    stopChat = next.chat.watch({
-      event(event) {
-        if (current !== generation) return;
-        if (event.kind === "message") remember(event.message);
-        else if (event.kind === "instance" && event.room) adopt(event.room);
-        else if (["joined", "left", "closed", "countdown", "countdown-cancelled"].includes(event.kind)) {
-          void refresh().catch(failed);
-        }
-      },
-      snapshot() {
-        if (current !== generation) return;
-        void Promise.all([refresh(), next.chat.messages()]).then(([, history]) => {
-          if (current !== generation) return;
-          for (const message of history) remember(message);
-        }).catch(failed);
-      },
-      status(value) { if (current === generation) { status = value; emitChat(); } },
-      refused() { if (current === generation) failed(new Error("Access to this game room ended.")); },
-    });
+    handoff = next; client = playClient; room = next.table;
     function failed(error) {
       if (current !== generation) return;
       console.error("[gcr:party]", error);
       emit({ kind: "transport-error", message: error.message });
-    }
-    async function refresh() {
-      const revision = tableRevision;
-      const table = await next.read();
-      if (current === generation && revision === tableRevision) adopt(table);
     }
     try {
       const ticket = await playClient.request(`/rooms/${encodeURIComponent(next.table.code)}/relay-ticket`, {});
@@ -559,7 +521,6 @@ export function createPartyClient({ WebSocket: Socket = globalThis.WebSocket } =
         relay.addEventListener("error", () => reject(new Error("The race relay could not connect.")), { once: true });
         relay.addEventListener("close", () => reject(new Error("The race relay closed.")), { once: true });
       });
-      if (current === generation) await refresh();
     } catch (error) {
       if (current === generation) stop();
       throw error;
@@ -577,29 +538,9 @@ export function createPartyClient({ WebSocket: Socket = globalThis.WebSocket } =
     get actor() { return handoff?.identity.actor || ""; },
     get you() { return handoff?.seat || null; },
     noteSlots(slots) { if (room) room = { ...room, slots }; },
-    async arrive() {
-      const current = generation, revision = tableRevision, active = handoff;
-      if (!active) return;
-      const table = await active.arrive();
-      if (current === generation && revision === tableRevision) adopt(table);
-    },
     async leave() { if (room) await client.action(room.code, "leave"); },
     sendStick(stick) { return sendRelay({ kind: "stick", seq: ++seq, ...stick }); },
     sendSnapshot(snapshot) { return sendRelay({ kind: "snapshot", seq: ++seq, ...snapshot }); },
     onRelay(listener) { relayListeners.add(listener); return () => relayListeners.delete(listener); },
-    onTable(listener) { tableListeners.add(listener); return () => tableListeners.delete(listener); },
-    chatTransport() {
-      return {
-        subscribe(listener) { chatListeners.add(listener); emitChat(); return () => chatListeners.delete(listener); },
-        async send(text) {
-          const current = generation, active = handoff;
-          if (!active) return false;
-          const saved = await active.chat.say(text);
-          if (current === generation) remember(saved);
-          return saved;
-        },
-        nameFor(actor) { return room?.slots.find(row => row.actor === actor)?.displayName || ""; },
-      };
-    },
   };
 }
