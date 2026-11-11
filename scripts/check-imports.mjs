@@ -1,7 +1,8 @@
 // Import discipline for this repository.
 //
 // 1. Every relative import (`./x.js`, `../y.mjs`, with or without a `?v=` query) resolves to a file.
-// 2. Halo is a pinned release tag in package.json and is imported as `@rb/halo` or `@rb/halo/src/...`.
+// 2. Halo and Arcade are pinned release tags in package.json and are imported as `@rb/halo`,
+//    `@rb/halo/<export>`, `@rb/halo/src/...` or `@rb/arcade/<export>`.
 //    The browser resolves those through the import map in index.html, which points into node_modules;
 //    Node resolves them through the package's exports.
 // 3. No source import reaches into node_modules by path (`../node_modules/@rb/halo/src/...`): only the
@@ -23,12 +24,12 @@ const SKIP_DIRS = new Set([
 const SIBLING = /(?:^|[^\w])(?:\.\.\/)+(?:halo|lattice)(?:\/|$)|(?<!@rb)\/(?:halo|lattice)\/src\/|file:\.\.\//;
 const NODE_MODULES_PATH = /(?:^|\/)node_modules\//;
 const LIBRARY_PATH = /(?:^|\/)node_modules\/@rb\//;
-const PIN = /^github:Rick-Boardman\/vr-(?:halo|lattice)#v\d+\.\d+\.\d+$/;
+const PIN = /^github:Rick-Boardman\/vr-(?:halo|lattice|arcade)#v\d+\.\d+\.\d+$/;
 const IMPORT_MAP = /<script\s+type=["']importmap["']\s*>([\s\S]*?)<\/script>/g;
 const stringLiterals = /["']([^"'\n]+)["']/g;
 const moduleSpecifier = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"'\n]+)["']/g;
 const relativeImport = /["'](\.{1,2}\/[^"'\n]+\.(?:js|mjs)(?:\?[^"'\n]*)?)["']/g;
-const libraryImport = /["'](@rb\/(?:halo|lattice)(?:\/[^"'\n]*)?)["']/g;
+const libraryImport = /["'](@rb\/(?:halo|lattice|arcade)(?:\/[^"'\n]*)?)["']/g;
 
 const problems = [];
 const report = (file, message) => problems.push(`${path.relative(root, file).replaceAll("\\", "/")}: ${message}`);
@@ -57,7 +58,7 @@ function libraryExports(lib) {
 
 function checkLibrarySpecifier(file, specifier) {
   const [clean] = specifier.split("?");
-  const match = /^@rb\/(halo|lattice)(?:\/(.*))?$/.exec(clean);
+  const match = /^@rb\/(halo|lattice|arcade)(?:\/(.*))?$/.exec(clean);
   if (!match) return;
   const [, lib, sub] = match;
   const exportsMap = libraryExports(lib);
@@ -111,4 +112,4 @@ if (problems.length) {
   for (const problem of problems) console.error(`check-imports: ${problem}`);
   process.exit(1);
 }
-console.log(`check-imports: ${name}: relative imports resolve; Halo comes from a pinned tag in node_modules through the import map.`);
+console.log(`check-imports: ${name}: relative imports resolve; Halo and Arcade come from pinned tags in node_modules through the import map.`);

@@ -44,7 +44,11 @@ import { createRider } from "./rider.js";
 import { createTown } from "./town.js";
 import { VIEWS, referencePitch, referenceYaw, viewIndexFor, vrFootAnchor, vrPresentRig, vrViewAnchor } from "./views.js";
 import { createTilt } from "./tilt.js";
-import { placeHudMount, stageVrPanels, VR_LAYOUT_H, VR_LAYOUT_W } from "./vr-chrome.js";
+import {
+  createHudPathCameraMount,
+  createHudPathCameraPanels,
+  HUD_PATH_CAMERA_SIDE_YAW_RAD,
+} from "@rb/halo/hud";
 import {
   footDragStick,
   footStrafe,
@@ -61,6 +65,9 @@ import {
 } from "./input.js";
 
 const BEST_KEY = "garbage-can-race-best";
+// The VR HUD layout surface, in Halo layout pixels.
+const VR_LAYOUT_W = 2800;
+const VR_LAYOUT_H = 1400;
 const HOTBAR = {
   camera: 0,
   course: 1,
@@ -432,9 +439,16 @@ player = boot.rig.player;
 playerYaw = boot.rig.playerYaw;
 head = boot.rig.head;
 let vrEyePitch = 0;
-const hudMount = new THREE.Group();
-hudMount.name = "hud-mount";
-boot.rig.playerPitch.add(hudMount);
+// The camera is locked to the road, so Halo's path-camera mount turns the HUD
+// sphere toward the look and the panels sit in columns just past the forward cap.
+const hudMount = createHudPathCameraMount({ THREE, renderer, hud: hudSystem.hud, name: "hud-mount" });
+const vrPanels = createHudPathCameraPanels({
+  hudSystem,
+  columns: [
+    { yaw: -HUD_PATH_CAMERA_SIDE_YAW_RAD, keys: ["race", "help", "hotbar"] },
+    { yaw: HUD_PATH_CAMERA_SIDE_YAW_RAD, keys: ["xr", "race-chat", "settings"], showKeys: ["xr"] },
+  ],
+});
 const enterVrButton = document.getElementById("enter-vr");
 if (enterVrButton) {
   enterVrButton.addEventListener("click", () => {
@@ -552,12 +566,7 @@ function placeSettings() {
   syncHillSlots(items);
 }
 function holdVrPanels() {
-  stageVrPanels({
-    windows: hudSystem?.hud?.ui?.windows,
-    layoutW: VR_LAYOUT_W,
-    layoutH: VR_LAYOUT_H,
-    eyePitch: vrEyePitch,
-  });
+  vrPanels.place({ pitch: vrEyePitch, layoutW: VR_LAYOUT_W, layoutH: VR_LAYOUT_H });
 }
 function captureVrDesktop() {
   const windows = hudSystem?.hud?.ui?.windows;
@@ -862,13 +871,14 @@ function placeWorld(presenting) {
     // Aim the sphere at the locked look. The panels are 50° off that aim,
     // so the road stays in the middle. Root rotation stays 0 for the click.
     vrEyePitch = pitch + posePitch;
-    placeHudMount(hudMount, hudSystem?.hud?.root, poseYaw, vrEyePitch);
+    hudMount.update({ yaw: poseYaw, pitch: vrEyePitch });
     holdVrPanels();
     player.position.set(placed.x, placed.y, placed.z);
     if (head) head.quaternion.set(placed.headX, placed.headY, placed.headZ, placed.headW);
     camera.position.set(0, 0, 0);
     camera.rotation.set(0, 0, 0);
   } else {
+    hudMount.update();
     if (hudSystem?.hud?.root) hudSystem.hud.root.rotation.set(0, 0, 0);
     if (head) head.rotation.set(0, 0, 0);
     player.position.set(followX, posed.y + shoulder + view.pivot + viewHop, followZ);

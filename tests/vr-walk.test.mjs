@@ -14,7 +14,7 @@ import {
   vrJumpDown,
   vrStickPair,
 } from "../src/input.js";
-import { placeHudMount } from "../src/vr-chrome.js";
+import { createHudPathCameraMount } from "@rb/halo/hud";
 import { VIEWS, referencePitch, referenceYaw, vrFootAnchor, vrPresentRig } from "../src/views.js";
 
 test("the headset face matches the course frame", () => {
@@ -236,12 +236,12 @@ test("a headset turned around in the room still looks down the road", () => {
   head.add(cam);
 
   const expected = new THREE.Vector3(0, 0, -1);
-  const mount = new THREE.Group();
   const hud = new THREE.Group();
   const hudQuat = new THREE.Quaternion();
   const panelDir = new THREE.Vector3();
-  pitchNode.add(mount);
+  pitchNode.add(hud);
   hud.position.set(0.35, 1.45, -0.2);
+  const mount = createHudPathCameraMount({ THREE, renderer: { xr: { isPresenting: true } }, hud: { root: hud } });
   let eye = null;
   for (const turned of [0, Math.PI, -1.4, 2.2]) {
     for (const posePitch of [0, 0.35]) {
@@ -284,7 +284,7 @@ test("a headset turned around in the room still looks down the road", () => {
       // The mount aims the sphere at the locked look for every room yaw.
       // The root stays at rotation 0, which is what Halo raycasts.
       const eyePitch = viewPitch + referencePitch(pose.x, pose.y, pose.z, pose.w);
-      placeHudMount(mount, hud, py, eyePitch);
+      mount.update({ yaw: py, pitch: eyePitch });
       player.updateMatrixWorld(true);
       assert.equal(hud.rotation.y, 0);
       hud.getWorldQuaternion(hudQuat);
