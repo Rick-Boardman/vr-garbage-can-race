@@ -30,7 +30,8 @@ import {
   takeJump,
 } from "./party.js";
 import { createRemoteRiders } from "./remotes.js";
-import { checkCourseFrame, createCourse, districtAt, headingYaw, sampleCourse, wrapAngle } from "./course.js";
+import { garbageCanRaceYaw } from "@rb/arcade/course";
+import { checkCourseFrame, createCourse, districtAt, sampleCourse, wrapAngle } from "./course.js";
 import { createDaylight } from "./daylight.js";
 import { STRAFE_SPEED, WALK_SPEED, createRideState, stepRide, walkerForward } from "./drive.js";
 import { createExtremeScraps, readExtreme } from "./extreme.js";
@@ -392,10 +393,10 @@ const boot = createSceneHudBootstrap({
       vrSeatEye = null;
       const sample = sampleCourse(course, ride.s);
       if (!look) return;
-      look.setYaw(headingYaw(sample.forward.x, sample.forward.z));
+      look.setYaw(garbageCanRaceYaw({ x: sample.forward.x, y: 0, z: sample.forward.z }));
       look.setPitch(0);
       look.setRoll(0);
-      lastHeading = headingYaw(sample.forward.x, sample.forward.z);
+      lastHeading = garbageCanRaceYaw({ x: sample.forward.x, y: 0, z: sample.forward.z });
     },
     onExitVR() {
       vrSeatEye = null;
@@ -762,12 +763,12 @@ function placeWorld(presenting) {
   const facing = ejected
     ? walkerForward(posed.forward, posed.right, ejected.face || 0)
     : null;
-  const courseHeading = headingYaw(posed.forward.x, posed.forward.z);
+  const courseHeading = garbageCanRaceYaw({ x: posed.forward.x, y: 0, z: posed.forward.z });
   // On foot, eject.face is the view and the walk. The right stick owns it.
   // In the can, heading stays on the course. The headset yaw is cancelled
   // below so a rider turned around in the room still looks along heading.
   const heading = facing
-    ? headingYaw(facing.x, facing.z)
+    ? garbageCanRaceYaw({ x: facing.x, y: 0, z: facing.z })
     : courseHeading;
   // A touch drag holds its pitch for the whole press. Zeroing it here
   // threw the walk stick away before sampleInput could read it.

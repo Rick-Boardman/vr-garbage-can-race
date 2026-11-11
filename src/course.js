@@ -1,7 +1,10 @@
 // Downhill path in the Three.js y-up, right-handed frame.
 // Travel at heading 0 is world -z. Right is (-forward.z, 0, forward.x) on the
 // ground plane, which is +x when forward is -z. Grade lowers y as s grows.
+// The travel frame and the -Z nose yaw are Arcade's (`@rb/arcade/course`), which
+// uses this same convention. The endless hill, its districts and forks stay here.
 
+import { frameFromTravel, garbageCanRaceYaw } from "@rb/arcade/course";
 import {
   DISTRICT_LENGTH,
   SAMPLE_STEP,
@@ -30,11 +33,6 @@ function halfWidthFor(theme) {
 
 export function wrapAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
-}
-
-export function headingYaw(tx, tz) {
-  // Local -z faces (tx, tz). yaw 0 looks down -z; yaw -pi/2 looks down +x.
-  return Math.atan2(-tx, -tz);
 }
 
 function mulberry32(seed) {
@@ -240,26 +238,6 @@ function lerpAngle(a, b, t) {
   return a + wrapAngle(b - a) * t;
 }
 
-// Right of a ground-plane forward: (-fz, 0, fx). forward × worldUp when forward is flat.
-export function frameFromTangent(tx, ty, tz) {
-  const length = Math.hypot(tx, ty, tz) || 1;
-  const fx = tx / length;
-  const fy = ty / length;
-  const fz = tz / length;
-  const horizontal = Math.hypot(fx, fz) || 1;
-  const rx = -fz / horizontal;
-  const rz = fx / horizontal;
-  const ux = -rz * fy;
-  const uy = rz * fx - rx * fz;
-  const uz = rx * fy;
-  const upLength = Math.hypot(ux, uy, uz) || 1;
-  return {
-    forward: { x: fx, y: fy, z: fz },
-    right: { x: rx, y: 0, z: rz },
-    up: { x: ux / upLength, y: uy / upLength, z: uz / upLength },
-  };
-}
-
 export function sampleCourse(course, s) {
   const distance = Math.max(0, s);
   ensureSamples(course, distance + SAMPLE_STEP);
@@ -271,11 +249,11 @@ export function sampleCourse(course, s) {
   const psi = lerpAngle(a.psi, b.psi, t);
   const grade = a.grade + (b.grade - a.grade) * t;
   const cosGrade = Math.cos(grade);
-  const frame = frameFromTangent(
-    Math.sin(psi) * cosGrade,
-    -Math.sin(grade),
-    -Math.cos(psi) * cosGrade,
-  );
+  const frame = frameFromTravel({
+    x: Math.sin(psi) * cosGrade,
+    y: -Math.sin(grade),
+    z: -Math.cos(psi) * cosGrade,
+  });
   const district = districtAt(course, distance);
   return {
     s: distance,
@@ -309,8 +287,8 @@ export function checkCourseFrame(course) {
   }
   if (Math.abs(start.right.y) > 1e-4) errors.push("right.y should be 0");
   if (start.up.y < 0.9) errors.push("up is not above the road");
-  if (Math.abs(headingYaw(0, -1)) > 1e-6) errors.push("heading 0 should face -z");
-  if (Math.abs(headingYaw(1, 0) + Math.PI / 2) > 1e-6) errors.push("heading should face +x at yaw -pi/2");
+  if (Math.abs(garbageCanRaceYaw({ x: 0, y: 0, z: -1 })) > 1e-6) errors.push("heading 0 should face -z");
+  if (Math.abs(garbageCanRaceYaw({ x: 1, y: 0, z: 0 }) + Math.PI / 2) > 1e-6) errors.push("heading should face +x at yaw -pi/2");
   const again = sampleCourse(createCourse(course.seed), 80);
   if (Math.abs(again.y - later.y) > 1e-6 || Math.abs(again.x - later.x) > 1e-6) {
     errors.push("course is not deterministic");

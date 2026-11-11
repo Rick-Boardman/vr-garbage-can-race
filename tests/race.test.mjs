@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { branchCenter, carriageCenter, createCourse, checkCourseFrame, forkAt, frameFromTangent, headingYaw, holdCarriage, sampleCourse, stayOnRoute, wrapAngle } from "../src/course.js";
+import { frameFromTravel, garbageCanRaceYaw } from "@rb/arcade/course";
+import { branchCenter, carriageCenter, createCourse, checkCourseFrame, forkAt, holdCarriage, sampleCourse, stayOnRoute, wrapAngle } from "../src/course.js";
 import { checkRibbonFacesUp } from "../src/road.js";
 import { applyFrame } from "../src/frame.js";
 import {
@@ -70,8 +71,8 @@ test("the hill drops and the frame stays right-handed", () => {
   const start = sampleCourse(course, 0);
   const later = sampleCourse(course, 80);
   assert.ok(later.y < start.y - 3);
-  assert.ok(Math.abs(headingYaw(0, -1)) < 1e-6);
-  assert.ok(Math.abs(headingYaw(1, 0) + Math.PI / 2) < 1e-6);
+  assert.ok(Math.abs(garbageCanRaceYaw({ x: 0, y: 0, z: -1 })) < 1e-6);
+  assert.ok(Math.abs(garbageCanRaceYaw({ x: 1, y: 0, z: 0 }) + Math.PI / 2) < 1e-6);
   const again = sampleCourse(createCourse(7), 80);
   assert.ok(Math.abs(again.x - later.x) < 1e-6);
   assert.ok(Math.abs(again.z - later.z) < 1e-6);
@@ -211,7 +212,7 @@ test("a split-road dash sits in the middle of that road and points along it", ()
   };
   const a = point(back, 1);
   const b = point(fore, 1);
-  const chord = frameFromTangent(b.x - a.x, 0, b.z - a.z);
+  const chord = frameFromTravel({ x: b.x - a.x, y: 0, z: b.z - a.z });
   const along = here.forward.x * chord.forward.x + here.forward.z * chord.forward.z;
   assert.ok(along < 0.995, `dash still follows the shared centerline ${along}`);
   const midX = (a.x + b.x) * 0.5;
@@ -226,7 +227,7 @@ test("road ribbons face up on the flat and on a slope", () => {
 
 test("applyFrame maps local -z to forward and local +x to right", () => {
   const object = new THREE.Object3D();
-  const tangent = frameFromTangent(0, -0.16, -1);
+  const tangent = frameFromTravel({ x: 0, y: -0.16, z: -1 });
   applyFrame(object, tangent);
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(object.quaternion);
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(object.quaternion);
@@ -1179,7 +1180,7 @@ test("a road decal follows the slope", () => {
   const up = new THREE.Vector3(tilted.up.x, tilted.up.y, tilted.up.z);
   const sloped = normal.dot(up);
   assert.ok(sloped > 0.98, `decal ${sloped}`);
-  const flat = frameFromTangent(tilted.forward.x, 0, tilted.forward.z);
+  const flat = frameFromTravel({ x: tilted.forward.x, y: 0, z: tilted.forward.z });
   applyFrame(disc, flat);
   const flatNormal = new THREE.Vector3(0, 1, 0).applyQuaternion(disc.quaternion);
   assert.ok(sloped > flatNormal.dot(up) + 0.002, "upright frame drops the grade");

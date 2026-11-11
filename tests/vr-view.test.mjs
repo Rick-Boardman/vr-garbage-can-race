@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { createCourse, headingYaw, sampleCourse } from "../src/course.js";
+import { garbageCanRaceYaw } from "@rb/arcade/course";
+import { createCourse, sampleCourse } from "../src/course.js";
 import { VIEWS, viewIndexFor, vrViewAnchor } from "../src/views.js";
 
 const CAN_HEIGHT = 0.98;
@@ -14,7 +15,7 @@ function desktopEye(origin, forward, cam, pitch) {
   rig.add(yaw);
   yaw.add(camera);
   rig.position.set(origin.x, origin.y, origin.z);
-  yaw.rotation.y = headingYaw(forward.x, forward.z);
+  yaw.rotation.y = garbageCanRaceYaw({ x: forward.x, y: 0, z: forward.z });
   camera.position.set(cam[0], cam[1], cam[2]);
   camera.rotation.x = pitch;
   rig.updateMatrixWorld(true);
@@ -30,7 +31,7 @@ function headsetEye(anchor, forward, pitch, seat) {
   yaw.add(head);
   head.add(camera);
   rig.position.set(anchor.x, anchor.y, anchor.z);
-  yaw.rotation.y = headingYaw(forward.x, forward.z);
+  yaw.rotation.y = garbageCanRaceYaw({ x: forward.x, y: 0, z: forward.z });
   head.rotation.x = pitch;
   camera.position.set(0, seat, 0);
   rig.updateMatrixWorld(true);

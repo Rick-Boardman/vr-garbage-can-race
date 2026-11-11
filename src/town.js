@@ -3,7 +3,8 @@
 
 import * as THREE from "three";
 import { applyFrame } from "./frame.js";
-import { branchCenter, carriageCenter, frameFromTangent, holdCarriage, sampleCourse, wrapAngle } from "./course.js";
+import { frameFromTravel } from "@rb/arcade/course";
+import { branchCenter, carriageCenter, holdCarriage, sampleCourse, wrapAngle } from "./course.js";
 import { edgesAlong, ribbonGeometry } from "./road.js";
 import { restCanTilt } from "./drive.js";
 import { SITTER, animatePerson, createFlop, isStepping, poseForTravel, stepFlop } from "./props.js";
@@ -385,7 +386,7 @@ function chunkSeed(courseSeed, index) {
 }
 
 export function faceStreet(sample, side) {
-  return frameFromTangent(-side * sample.right.x, 0, -side * sample.right.z);
+  return frameFromTravel({ x: -side * sample.right.x, y: 0, z: -side * sample.right.z });
 }
 
 // Sidewalk grass starts just past halfWidth + 3.25. The front rail stands
@@ -424,18 +425,18 @@ export function slopeWithGrade(object, shear) {
 function armTowardStreet(sample, side) {
   const ix = -side * sample.right.x;
   const iz = -side * sample.right.z;
-  return frameFromTangent(iz, 0, -ix);
+  return frameFromTravel({ x: iz, y: 0, z: -ix });
 }
 
 function upright(sample, dir) {
-  return frameFromTangent(sample.forward.x * dir, 0, sample.forward.z * dir);
+  return frameFromTravel({ x: sample.forward.x * dir, y: 0, z: sample.forward.z * dir });
 }
 
 // The board faces the lane and back up the hill, toward a rider coming down.
 export function signFrame(sample, side) {
   const tx = -side * sample.right.x * 0.72 - sample.forward.x * 0.9;
   const tz = -side * sample.right.z * 0.72 - sample.forward.z * 0.9;
-  return frameFromTangent(tx, 0, tz);
+  return frameFromTravel({ x: tx, y: 0, z: tz });
 }
 
 // Push a walker out of cars and out of the player before the paths overlap.
@@ -1104,7 +1105,7 @@ export function createTown(THREE, scene, materials, props) {
           (back.y + fore.y) * 0.5 + 0.03,
           (back.z + fore.z) * 0.5,
         );
-        applyFrame(dash, frameFromTangent(fore.x - back.x, fore.y - back.y, fore.z - back.z));
+        applyFrame(dash, frameFromTravel({ x: fore.x - back.x, y: fore.y - back.y, z: fore.z - back.z }));
         root.add(dash);
       }
     }
@@ -1133,7 +1134,7 @@ export function createTown(THREE, scene, materials, props) {
       const style = roll > 0.97 ? "cop" : roll > 0.8 ? "truck" : roll > 0.66 ? "taxi" : roll > 0.45 ? "stripe" : "plain";
       const car = props.createCar(rand, style);
       const dir = rand() > 0.5 ? 1 : -1;
-      const frame = frameFromTangent(sample.forward.x * dir, sample.forward.y * dir, sample.forward.z * dir);
+      const frame = frameFromTravel({ x: sample.forward.x * dir, y: sample.forward.y * dir, z: sample.forward.z * dir });
       // Outer lane, wheels at the curb. Traffic uses ±0.36 of the half-width and misses these.
       const halfW = car.userData.halfW || 0.95;
       const offset = side * (sample.halfWidth - Math.max(1.15, halfW + 0.25));
@@ -2120,11 +2121,7 @@ export function createTown(THREE, scene, materials, props) {
       });
       const travel = Math.abs(car.speed) > 0.4 ? car.speed : (car.cruise ?? car.speed);
       const dir = Math.sign(car.dir) || (travel >= 0 ? 1 : -1);
-      const frame = frameFromTangent(
-        sample.forward.x * dir,
-        sample.forward.y * dir,
-        sample.forward.z * dir,
-      );
+      const frame = frameFromTravel({ x: sample.forward.x * dir, y: sample.forward.y * dir, z: sample.forward.z * dir });
       car.mesh.position.set(
         sample.x + sample.right.x * offset,
         sample.y,
