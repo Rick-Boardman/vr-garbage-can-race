@@ -56,9 +56,9 @@ Peer versions match Halo: `three` 0.185.1 and `troika-three-text` 0.52.4. The pa
 
 ## Shared library pins
 
-`package.json` pins `@rb/halo` at `v0.3.0` and `@rb/arcade` at `v0.5.0`. Halo v0.3.0 carries
-the settings window (v0.2.6), the path-camera HUD (v0.2.7) and device input (v0.2.8), and
-peers exactly Three.js 0.185.1. In 0.185 `BatchedMesh.addGeometry` returns a geometry id, so
+`package.json` pins `@rb/halo` at `v0.3.1` and `@rb/arcade` at `v0.5.0`. Halo v0.3.1 carries
+the settings window (v0.2.6), the path-camera HUD (v0.2.7), device input (v0.2.8) and the edge-pair
+ribbon `buildRibbonSurfaceGeometry` (v0.3.1), and peers exactly Three.js 0.185.1. In 0.185 `BatchedMesh.addGeometry` returns a geometry id, so
 `src/props.js` takes each instance id from `addInstance`. `index.html`'s import map names each subpath
 (`@rb/halo/hud`, `/input`, `/ui`, `/curve-surface`, and `@rb/arcade/audio`, `/presentation`,
 `/course`, `/racing`, `/entry`) inside `node_modules`.
@@ -73,8 +73,9 @@ peers exactly Three.js 0.185.1. In 0.185 `BatchedMesh.addGeometry` returns a geo
 | `@rb/arcade/audio` | the unlock, master gain and voice lifecycle in `src/audio.js`. Clips, the cue plan and the crossfading loop bed stay |
 | `@rb/arcade/entry` | the chat watch, table reads, arrival and RIDERS chat adapter in `src/party.js`. The stick/pose relay socket stays |
 
-Not replaced: `src/road.js` (Halo's road surface stitches a closed curve with the opposite
-winding, and Arcade's surface builds only its own courses), `separatePack` in `src/party.js`
+Road strips: the town samples the course and picks each strip's width, offset and lift in
+`src/town.js` (`crossSectionsAlong`), then Halo's `buildRibbonSurfaceGeometry` stitches the open
+strip. Not replaced: `separatePack` in `src/party.js`
 (rider collision is physics, which `@rb/arcade/racing` leaves to the game; the endless hill has
 no laps or finish to rank). Those are follow-up tickets.
 

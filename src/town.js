@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { applyFrame } from "./frame.js";
 import { frameFromTravel } from "@rb/arcade/course";
 import { branchCenter, carriageCenter, holdCarriage, sampleCourse, wrapAngle } from "./course.js";
-import { edgesAlong, ribbonGeometry } from "./road.js";
+import { buildRibbonSurfaceGeometry } from "@rb/halo/curve-surface";
 import { restCanTilt } from "./drive.js";
 import { SITTER, animatePerson, createFlop, isStepping, poseForTravel, stepFlop } from "./props.js";
 import {
@@ -17,6 +17,54 @@ import {
 } from "./constants.js";
 
 const LANE_GAP = 9;
+
+// Narrowest strip Halo's stitcher accepts: it refuses a zero-width cross-section
+// (the median grass where a fork opens or closes) because that triangle cannot face up.
+export const MIN_STRIP_WIDTH = 0.004;
+
+// Lateral offsets across the course frame become the left/right points of each
+// cross-section. Sampling, width, offset and lift stay game policy.
+export function crossSectionsAlong(samples, leftOf, rightOf, lift = 0) {
+  const leftFn = typeof leftOf === "function" ? leftOf : () => leftOf;
+  const rightFn = typeof rightOf === "function" ? rightOf : () => rightOf;
+  return samples.map((sample) => {
+    let left = leftFn(sample);
+    let right = rightFn(sample);
+    if (Math.abs(right - left) < MIN_STRIP_WIDTH) {
+      const mid = (left + right) * 0.5;
+      left = mid - MIN_STRIP_WIDTH * 0.5;
+      right = mid + MIN_STRIP_WIDTH * 0.5;
+    }
+    return {
+      leftPoint: { x: sample.x + sample.right.x * left, y: sample.y + lift, z: sample.z + sample.right.z * left },
+      rightPoint: { x: sample.x + sample.right.x * right, y: sample.y + lift, z: sample.z + sample.right.z * right },
+    };
+  });
+}
+
+// An open strip of the course, upward-facing. The caller disposes the geometry.
+export function courseRibbonGeometry(samples, leftOf, rightOf, lift = 0) {
+  return buildRibbonSurfaceGeometry(crossSectionsAlong(samples, leftOf, rightOf, lift), { closed: false });
+}
+
+// Start-up self-check through the game's own path: every strip must face up on the
+// flat and on a slope. Returns the error messages, empty when all is well.
+export function checkRibbonFacesUp() {
+  const errors = [];
+  const sample = (z, y) => ({ x: 0, y, z, right: { x: 1, y: 0, z: 0 } });
+  for (const [name, samples] of [
+    ["flat", [sample(0, 0), sample(-4, 0)]],
+    ["sloped", [sample(0, 1), sample(-4, 0.6)]],
+  ]) {
+    const geometry = courseRibbonGeometry(samples, -2, 2);
+    const normals = geometry.getAttribute("normal");
+    for (let i = 0; i < normals.count; i += 1) {
+      if (!(normals.getY(i) > 0)) errors.push(`${name} ribbon normal y=${normals.getY(i)}`);
+    }
+    geometry.dispose();
+  }
+  return errors;
+}
 
 export function layFlat(geometry) {
   geometry.rotateX(-Math.PI / 2);
@@ -813,8 +861,7 @@ export function createTown(THREE, scene, materials, props) {
   }
 
   function addRibbon(root, samples, leftOf, rightOf, lift, material) {
-    const edges = edgesAlong(samples, leftOf, rightOf, lift);
-    root.add(new THREE.Mesh(ribbonGeometry(THREE, edges), material));
+    root.add(new THREE.Mesh(courseRibbonGeometry(samples, leftOf, rightOf, lift), material));
   }
 
   function buildChunk(course, index) {
@@ -864,7 +911,7 @@ export function createTown(THREE, scene, materials, props) {
       addRibbon(root, samples, -0.08, 0.08, 0.025, yellow);
     }
     for (const side of [-1, 1]) {
-      // Left vertex is the more negative offset so the normal stays +Y.
+      // Halo winds each triangle to face up, whichever offset is named left.
       const span = (inner, outer) => ({
         left: (sample) => Math.min(side * inner(sample), side * outer(sample)),
         right: (sample) => Math.max(side * inner(sample), side * outer(sample)),
