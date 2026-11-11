@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { createHudChatPanel } from "../node_modules/@rb/halo/src/ui/chat-panel.js";
-import { createHudTextEditor } from "../node_modules/@rb/halo/src/hud-text-editor.js";
+import { createHudChatPanel } from "@rb/halo/src/ui/chat-panel.js";
+import { createHudTextEditor } from "@rb/halo/src/hud-text-editor.js";
 
 const bus = new EventTarget();
 

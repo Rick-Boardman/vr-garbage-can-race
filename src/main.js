@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createSceneHudBootstrap, renderHudFrame, startAnimationLoop } from "@rb/halo";
-import { createHudChatPanel } from "../node_modules/@rb/halo/src/ui/chat-panel.js";
+import { createHudChatPanel } from "@rb/halo/src/ui/chat-panel.js";
 
 import { createSound } from "./audio.js";
 import { createGraphicsPanel, nextSettingsPlacement } from "./graphics-panel.js";

@@ -10,7 +10,7 @@ import {
   HUD_VR_DISTANCE_M,
   HUD_VR_SURFACE_HEIGHT_M,
   HUD_VR_SURFACE_WIDTH_M,
-} from "../node_modules/@rb/halo/src/hud-placement-policy.js";
+} from "@rb/halo/src/hud-placement-policy.js";
 
 const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisY = new THREE.Vector3(0, 1, 0);

@@ -1,4 +1,4 @@
-import { createWebXrSystemKeyboardBridge } from "../node_modules/@rb/halo/src/webxr-system-keyboard.js";
+import { createWebXrSystemKeyboardBridge } from "@rb/halo/src/webxr-system-keyboard.js";
 import { readExtreme, writeExtreme } from "./extreme.js";
 
 // In-scene graphics and sound controls. Halo's settings window otherwise
